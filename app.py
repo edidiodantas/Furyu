@@ -39,6 +39,9 @@ from ipeia_academico.ui_helpers import escape_markdown, format_score, hit_button
 
 ROOT = Path(__file__).resolve().parent
 APP_NAME = "IPeia Acadêmico"
+# Logo oficial IPeia (obrigatória em todos os projetos).
+LOGO_PATH = ROOT / "assets" / "logo-ipeia.png"
+FAVICON_PATH = ROOT / "assets" / "favicon-ipeia.png"
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +104,11 @@ def render_header(config: AppConfig, health: OllamaHealth) -> None:
                       color: #1f77b4; line-height: 1.1; margin: 0 0 .2rem 0; }}
         </style>"""
     )
-    st.markdown(f'<div class="app-title">📚 {APP_NAME}</div>', unsafe_allow_html=True)
+    logo_col, title_col = st.columns([1, 6], vertical_alignment="center")
+    with logo_col:
+        st.image(str(LOGO_PATH), width=110)
+    with title_col:
+        st.markdown(f'<div class="app-title">{APP_NAME}</div>', unsafe_allow_html=True)
     st.caption("Pesquisa, leitura e escrita acadêmica com IA local, a partir do seu acervo.")
     st.caption(
         f"Modelo: `{config.ollama_model}` · Embeddings: `{config.embedding_model}` · "
@@ -333,7 +340,7 @@ def render_broken_library(config: AppConfig, exc: LibraryError) -> None:
 def main() -> None:
     st.set_page_config(
         page_title=APP_NAME,
-        page_icon="📚",
+        page_icon=str(FAVICON_PATH),
         layout="wide",
         menu_items={
             "Get help": None,
@@ -341,6 +348,7 @@ def main() -> None:
             "About": f"{APP_NAME}: pesquisa acadêmica com IA local.",
         },
     )
+    st.logo(str(LOGO_PATH), size="large")
     try:
         config = _bootstrap_config()
     except ConfigError as exc:

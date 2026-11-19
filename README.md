@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo-ipeia.png" alt="Logo IPeia" width="180"></p>
+
 # IPeia Acadêmico
 
 Pesquisa, leitura e escrita acadêmica no seu computador, com IA **100% local** (Ollama), sem custo de API e sem enviar seus arquivos para a nuvem.
