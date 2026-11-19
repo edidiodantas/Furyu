@@ -160,3 +160,25 @@ def test_reset_apaga_meta(tmp_path):
     repo.save_docs(FakeDocs())
     repo.reset()
     assert not repo.meta_path.exists()
+
+
+def test_manifesto_antigo_sem_reference_continua_valido(repo):
+    repo.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    old = {"abc": {"filename": "a.pdf", "docname": "D", "source": "upload", "added_at": "x"}}
+    repo.manifest_path.write_text(json.dumps(old), encoding="utf-8")
+    assert repo.load_manifest()["abc"].reference is None
+
+
+def test_set_reference_grava_no_manifesto(repo):
+    repo.save_manifest({"abc": repo.new_entry("a.pdf", "D", "upload")})
+    repo.set_reference("abc", {"title": "T"})
+    assert repo.load_manifest()["abc"].reference == {"title": "T"}
+
+
+def test_set_reference_documento_inexistente(repo):
+    with pytest.raises(LibraryError, match="não encontrado"):
+        repo.set_reference("nada", {"title": "T"})
+
+
+def test_new_docs_usa_a_fabrica(repo):
+    assert isinstance(repo.new_docs(), FakeDocs)

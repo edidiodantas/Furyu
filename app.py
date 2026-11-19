@@ -8,16 +8,16 @@ rede em `ipeia_academico/search/`.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import date
 from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
 from paperqa import Docs
 
+from ipeia_academico.abnt import BibReferenceError, prefill_from_catalog
 from ipeia_academico.async_runner import BackgroundLoop
 from ipeia_academico.config import AppConfig, ConfigError, load_config
-from ipeia_academico.export import answer_to_markdown, extract_answer_text, extract_references
 from ipeia_academico.library import (
     ALLOWED_EXTENSIONS,
     InvalidDocumentError,
@@ -26,9 +26,9 @@ from ipeia_academico.library import (
     sha256_bytes,
 )
 from ipeia_academico.llm_health import check_llm
-from ipeia_academico.llm_settings import build_settings
+from ipeia_academico.llm_settings import build_settings, settings_for_mode
 from ipeia_academico.ollama_health import OllamaHealth
-from ipeia_academico.research_service import IndexOutcome, QuestionError, ResearchService
+from ipeia_academico.research_service import IndexOutcome, ResearchService
 from ipeia_academico.search import (
     SearchError,
     download_pdf,
@@ -36,7 +36,10 @@ from ipeia_academico.search import (
     safe_pdf_filename,
     search_academic,
 )
-from ipeia_academico.ui_helpers import escape_markdown, format_score, hit_button_key
+from ipeia_academico.ui import writing_modes
+from ipeia_academico.ui.reference_form import render_reference_form
+from ipeia_academico.ui_helpers import escape_markdown, hit_button_key
+from ipeia_academico.writing_service import AcademicWriter
 
 ROOT = Path(__file__).resolve().parent
 APP_NAME = "IPeia Acadêmico"
@@ -73,7 +76,14 @@ def get_service(_config: AppConfig) -> ResearchService:
     repo = LibraryRepository(
         _config.library_dir, _config.pdf_dir, Docs, embedding_model=_config.embedding_model
     )
-    return ResearchService(repo, repo.load_docs(), build_settings(_config))
+    return ResearchService(
+        repo, repo.load_docs(), build_settings(_config), citation_uppercase=_config.citation_uppercase
+    )
+
+
+def make_writer(config: AppConfig, service: ResearchService) -> AcademicWriter:
+    base = build_settings(config)
+    return AcademicWriter(service, lambda mode: settings_for_mode(base, config, mode))
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -86,8 +96,7 @@ def get_llm_health(_config: AppConfig) -> OllamaHealth:
 def init_session_state() -> None:
     st.session_state.setdefault("search_hits", [])
     st.session_state.setdefault("search_note", "")
-    st.session_state.setdefault("last_answer", None)
-    st.session_state.setdefault("last_question", "")
+    writing_modes.init_state()
     # Arquivos que falharam nesta sessão: não reprocessar a cada rerun.
     st.session_state.setdefault("failed_uploads", set())
 
@@ -143,7 +152,7 @@ def render_sidebar(config: AppConfig, service: ResearchService) -> None:
         st.warning("A primeira resposta pode levar minutos (carga do modelo). Não feche a aba.")
 
         if st.button("Limpar resposta", use_container_width=True):
-            st.session_state.last_answer = None
+            writing_modes.clear_result()
             st.session_state.search_hits = []
             st.session_state.search_note = ""
             st.rerun()
@@ -152,7 +161,7 @@ def render_sidebar(config: AppConfig, service: ResearchService) -> None:
         confirm = st.checkbox("Quero apagar o índice do acervo")
         if st.button("Apagar índice", type="secondary", disabled=not confirm, use_container_width=True):
             service.reset_library()
-            st.session_state.last_answer = None
+            writing_modes.clear_result()
             st.success("Índice apagado. Os arquivos em documentos/ continuam no disco.")
             st.rerun()
 
@@ -194,6 +203,7 @@ def render_upload(service: ResearchService, llm_ok: bool) -> None:
                 st.session_state.failed_uploads.add(digest)
                 status.update(label=f"Erro ao indexar {f.name}", state="error")
                 st.error(f"Falha: {exc}")
+    render_reference_form(service)
 
 
 def render_search(config: AppConfig, service: ResearchService, llm_ok: bool) -> None:
@@ -264,73 +274,25 @@ def _download_and_index(config: AppConfig, service: ResearchService, hit) -> Non
                 return
             st.write("Indexando (pode demorar)…")
             _index_file(service, path, digest, source=f"download:{url}")
+            _prefill_reference(service, digest, hit, url)
             status.update(label=f"Indexado: {path.name}", state="complete")
         except Exception as exc:  # noqa: BLE001
             status.update(label="Não foi possível indexar", state="error")
             st.error(str(exc))
 
 
-def render_question(config: AppConfig, service: ResearchService, llm_ok: bool) -> None:
-    st.subheader("3. Pergunta")
-    question = st.text_input(
-        "Pergunte sobre o seu acervo",
-        placeholder="Ex.: Quais são as principais conclusões sobre avaliação formativa?",
+def _prefill_reference(service: ResearchService, digest: str, hit, url: str) -> None:
+    """Aproveita os dados do catálogo como referência inicial (você pode corrigir)."""
+    data = prefill_from_catalog(
+        title=hit.title, year=hit.year, authors=hit.authors, venue=hit.venue, doi=hit.doi, url=url,
+        names_are_given_first=hit.source.startswith(("semantic-scholar", "crossref")),
+        today=date.today(),
     )
-    has_docs = service.has_documents()
-    if not has_docs:
-        st.info("O acervo está vazio. Envie ou baixe documentos acima.")
-    if not st.button("Perguntar", type="primary", disabled=not (has_docs and question.strip() and llm_ok)):
-        return
-    with st.status(f"Processando com `{config.llm_model}`…", expanded=True) as status:
-        try:
-            st.session_state.last_answer = get_loop().run(service.ask(question, config.answer_language))
-            st.session_state.last_question = question.strip()
-            status.update(label="Resposta pronta", state="complete")
-        except QuestionError as exc:
-            status.update(label="Pergunta inválida", state="error")
-            st.warning(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            st.session_state.last_answer = None
-            status.update(label="Erro na consulta", state="error")
-            st.error(f"Falha: {exc}")
-
-
-def render_answer(config: AppConfig) -> None:
-    session = st.session_state.last_answer
-    if session is None:
-        return
-    st.subheader("4. Resposta")
-    answer = extract_answer_text(session)
-    references = extract_references(session)
-    st.markdown(answer)
-    st.download_button(
-        "Baixar resposta (.md)",
-        data=answer_to_markdown(
-            st.session_state.last_question,
-            answer,
-            references,
-            model=config.llm_name,
-            generated_at=datetime.now(),
-        ),
-        file_name="resposta-ipeia-academico.md",
-        mime="text/markdown",
-    )
-    with st.expander("Mostrar fontes (trechos usados)", expanded=False):
-        contexts = getattr(session, "contexts", None) or []
-        if not contexts:
-            st.markdown(references or "Nenhuma fonte estruturada retornada.")
-        for i, ctx in enumerate(contexts, start=1):
-            text = getattr(ctx, "text", None)
-            doc = getattr(text, "doc", None)
-            citation = (
-                getattr(doc, "citation", "") or getattr(doc, "docname", "") or getattr(text, "name", "")
-            )
-            score = format_score(getattr(ctx, "score", None))
-            st.markdown(f"**Fonte {i}**" + (f" (relevância: {score})" if score else ""))
-            if citation:
-                st.caption(citation)
-            st.write(getattr(ctx, "context", "") or getattr(text, "text", ""))
-            st.divider()
+    try:
+        service.set_reference(digest, data)
+        st.caption("Dados da referência preenchidos pelo catálogo. Confira em *Dados da referência (ABNT)*.")
+    except (BibReferenceError, LibraryError):
+        st.caption("Preencha os dados da referência em *Dados da referência (ABNT)*.")
 
 
 def render_broken_library(config: AppConfig, exc: LibraryError) -> None:
@@ -377,8 +339,8 @@ def main() -> None:
     render_sidebar(config, service)
     render_upload(service, health.ok)
     render_search(config, service, health.ok)
-    render_question(config, service, health.ok)
-    render_answer(config)
+    writing_modes.render_modes(config, service, make_writer(config, service), health.ok, get_loop().run)
+    writing_modes.render_result(config)
 
 
 main()

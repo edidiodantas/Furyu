@@ -10,8 +10,20 @@ from __future__ import annotations
 from typing import Any
 
 from paperqa import Settings
-from paperqa.settings import AgentSettings, AnswerSettings, IndexSettings, ParsingSettings
+from paperqa.settings import (
+    AgentSettings,
+    AnswerSettings,
+    IndexSettings,
+    ParsingSettings,
+    PromptSettings,
+)
 
+from ipeia_academico.academic_prompts import (
+    ACADEMIC_QA_PROMPT,
+    ACADEMIC_SYSTEM_PROMPT,
+    Mode,
+    mode_params,
+)
 from ipeia_academico.config import AppConfig
 
 LLM_TIMEOUT_SECONDS = 600
@@ -85,6 +97,7 @@ def build_settings(config: AppConfig) -> Settings:
             enrichment_llm_config=llm_config,
             multimodal=False,
         ),
+        prompts=PromptSettings(system=ACADEMIC_SYSTEM_PROMPT, qa=ACADEMIC_QA_PROMPT),
         answer=AnswerSettings(
             # Local: 1 requisição por vez (GPU pequena). Remoto: paralelo acelera.
             max_concurrent_requests=1 if config.provider.is_local else 4,
@@ -93,3 +106,14 @@ def build_settings(config: AppConfig) -> Settings:
             answer_length=config.answer_length,
         ),
     )
+
+
+def settings_for_mode(base: Settings, config: AppConfig, mode: Mode) -> Settings:
+    """Cópia das Settings com tamanho de resposta e nº de trechos do modo."""
+    params = mode_params(
+        mode, question_length=config.answer_length, question_evidence_k=config.evidence_k
+    )
+    settings = base.model_copy(deep=True)
+    settings.answer.answer_length = params.answer_length
+    settings.answer.evidence_k = params.evidence_k
+    return settings

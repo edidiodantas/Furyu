@@ -54,3 +54,23 @@ def test_escape_markdown_neutraliza_links():
 def test_format_score():
     assert format_score(8) == "8"
     assert format_score(None) == ""
+
+
+def test_document_to_markdown_com_referencias_e_aviso():
+    from ipeia_academico.export import document_to_markdown
+
+    md = document_to_markdown(
+        "Resumo", "Resumo de  X", "Corpo (Silva, 2020).", ("SILVA, A. **T**. 2020.",),
+        model="m", generated_at=datetime(2026, 1, 2, 3, 4), missing_docnames=("Doc1",),
+    )
+    assert md.startswith("# Resumo\n")
+    assert "- **Pedido:** Resumo de X" in md
+    assert "## REFERÊNCIAS\n\nSILVA, A. **T**. 2020.\n" in md
+    assert "Doc1" in md
+
+
+def test_document_to_markdown_sem_referencias():
+    from ipeia_academico.export import document_to_markdown
+
+    md = document_to_markdown("T", "p", "b", (), model="m", generated_at=datetime(2026, 1, 2))
+    assert "REFERÊNCIAS" not in md and "Sem dados ABNT" not in md

@@ -51,7 +51,12 @@ ipeia_academico/
   llm_health.py             Diz se a IA configurada está pronta
   ollama_health.py          Checa se o Ollama e o modelo estão disponíveis
   library.py                Acervo persistente: arquivos, índice (docs.pkl) e manifesto
-  research_service.py       Regra de negócio: indexar e perguntar
+  research_service.py       Regra de negócio: indexar, perguntar e guardar referências
+  writing_service.py        Modos de escrita: resumo de documento e texto por seções
+  academic_prompts.py       Instruções em português acadêmico e parâmetros de cada modo
+  abnt.py                   Referências e citações ABNT (funções puras)
+  citations.py              Troca as chaves do PaperQA2 por (Sobrenome, ano, p. X)
+  ui/                       Telas: modos de escrita e formulário da referência
   async_runner.py           Event loop único para chamar o PaperQA2 a partir do Streamlit
   search/                   Busca em catálogos abertos e download de PDF
     catalogs.py             Oasisbr, Semantic Scholar, Crossref
@@ -59,7 +64,7 @@ ipeia_academico/
     download.py             Download com limite de tamanho e checagem %PDF
     parsing.py              Extração de metadados (funções puras)
     service.py              Cascata de catálogos + deduplicação
-  export.py                 Exporta a resposta para Markdown
+  export.py                 Exporta o resultado para Markdown
   ui_helpers.py             Funções puras da interface
 tests/                      Testes unitários (pytest), sem rede e sem Ollama
 docs/                       Requisitos e análise técnica
@@ -74,6 +79,27 @@ python -m pytest
 ```
 
 Os testes usam dublês (sem rede, sem Ollama). O teste de `llm_settings` é pulado se o `paper-qa` não estiver instalado.
+
+## Modos de escrita e ABNT
+
+Na seção 3 da tela há três modos:
+
+| Modo | O que faz | Como busca no acervo |
+| --- | --- | --- |
+| **Pergunta** | Resposta curta (padrão de cerca de 300 palavras) | Os trechos mais parecidos com a pergunta, de todo o acervo |
+| **Resumo de documento** | Resumo acadêmico de um documento: objetivo, método, resultados e conclusões | Só trechos do documento escolhido (15 trechos) |
+| **Texto acadêmico** | Texto com as seções que você escolher (padrão: Introdução, Desenvolvimento, Considerações finais) | Uma busca própria para cada seção |
+
+As instruções da IA pedem português do Brasil, norma culta e linguagem impessoal, sem inventar dados.
+
+**Citações e referências.** Em *Dados da referência (ABNT)* (seção 1) você informa autor, título, ano, editora ou periódico de cada documento. Com isso, o app troca as marcas de citação da IA por **(Silva, 2020, p. 15)** e monta a lista de **REFERÊNCIAS** em ordem alfabética. Quem formata é o código, não a IA, então o formato sai certo mesmo com modelo pequeno. PDFs baixados pela busca já vêm com os dados do catálogo, para você conferir.
+
+- A citação segue a NBR 10520:2023, que usa o sobrenome em maiúsculas e minúsculas. Se a sua instituição ainda pede (SILVA, 2020), use `CITATION_UPPERCASE=true` no `.env`.
+- Documento sem dados preenchidos aparece com o nome interno e com o aviso "[dados ABNT não preenchidos]".
+- Arquivos `.txt`, `.md` e `.html` não têm página, então a citação sai sem "p.".
+- **Revise sempre.** O formato das referências segue a NBR 6023:2018 nos casos mais comuns (livro, artigo e documento on-line). A IA pode citar o trecho errado, então confira as páginas no original.
+
+Não é preciso anexar as normas da ABNT ao acervo: tudo o que está no acervo vira fonte de citação.
 
 ## Trocar o motor de IA
 

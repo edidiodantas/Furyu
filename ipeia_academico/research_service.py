@@ -11,6 +11,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from ipeia_academico.abnt import BibReference, BibReferenceError, build_reference
+from ipeia_academico.citations import FormattedAnswer, format_answer, sources_from_contexts
+from ipeia_academico.export import extract_answer_text
 from ipeia_academico.library import LibraryRepository, ManifestEntry, StoredFile
 
 MIN_QUESTION_CHARS = 3
@@ -27,6 +30,14 @@ class IndexResult:
     outcome: IndexOutcome
     filename: str
     docname: str
+
+
+@dataclass(frozen=True)
+class AnswerResult:
+    """Sessão do PaperQA2 (trechos usados) + texto já com citações ABNT."""
+
+    session: Any
+    formatted: FormattedAnswer
 
 
 class QuestionError(ValueError):
@@ -51,17 +62,32 @@ def build_question(question: str, language: str) -> str:
 
 
 class ResearchService:
-    def __init__(self, repository: LibraryRepository, docs: Any, settings: Any) -> None:
+    def __init__(
+        self,
+        repository: LibraryRepository,
+        docs: Any,
+        settings: Any,
+        *,
+        citation_uppercase: bool = False,
+    ) -> None:
         self._repo = repository
         self._docs = docs
         self._settings = settings
+        self._citation_uppercase = citation_uppercase
 
     @property
     def docs(self) -> Any:
         return self._docs
 
+    def new_docs(self) -> Any:
+        return self._repo.new_docs()
+
     def list_documents(self) -> list[ManifestEntry]:
         return sorted(self._repo.load_manifest().values(), key=lambda e: e.added_at)
+
+    def list_entries(self) -> list[tuple[str, ManifestEntry]]:
+        """(sha256, entrada) em ordem de inclusão; a chave identifica o arquivo."""
+        return sorted(self._repo.load_manifest().items(), key=lambda kv: kv[1].added_at)
 
     def has_documents(self) -> bool:
         return bool(self._repo.load_manifest())
@@ -99,10 +125,40 @@ class ResearchService:
         self._repo.save_manifest(manifest)
         return IndexResult(IndexOutcome.ADDED, path.name, docname)
 
-    async def ask(self, question: str, language: str) -> Any:
+    async def ask(self, question: str, language: str, *, settings: Any = None) -> AnswerResult:
         if not self.has_documents():
             raise QuestionError("O acervo está vazio. Envie ou baixe documentos primeiro.")
-        return await self._docs.aquery(build_question(question, language), settings=self._settings)
+        session = await self._docs.aquery(
+            build_question(question, language), settings=settings or self._settings
+        )
+        return AnswerResult(session, self.format_session(session))
+
+    # --- referências ABNT ---------------------------------------------------
+    def set_reference(self, sha256: str, data: dict[str, Any]) -> BibReference:
+        """Valida e grava os dados bibliográficos de um documento do acervo."""
+        reference = build_reference(data)
+        self._repo.set_reference(sha256, reference.to_dict())
+        return reference
+
+    def references_by_docname(self) -> dict[str, BibReference]:
+        refs: dict[str, BibReference] = {}
+        for entry in self._repo.load_manifest().values():
+            if not entry.reference:
+                continue
+            try:
+                refs[entry.docname] = build_reference(entry.reference)
+            except BibReferenceError:
+                continue  # dado antigo inválido: tratado como "sem dados ABNT"
+        return refs
+
+    def format_session(self, session: Any) -> FormattedAnswer:
+        raw = getattr(session, "raw_answer", "") or extract_answer_text(session)
+        return format_answer(
+            raw,
+            sources_from_contexts(getattr(session, "contexts", None) or []),
+            self.references_by_docname(),
+            uppercase=self._citation_uppercase,
+        )
 
     def reset_library(self) -> None:
         self._docs = self._repo.reset()

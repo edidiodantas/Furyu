@@ -8,7 +8,8 @@ reindexado, o que leva minutos por arquivo com LLM local.
 Formato em disco (dentro de `library_dir`):
 - docs.pkl ........ objeto `Docs` serializado com pickle (forma de salvar
                     documentada no README do PaperQA2: "Can I save or load?")
-- manifest.json ... {sha256: {filename, docname, source, added_at}}
+- manifest.json ... {sha256: {filename, docname, source, added_at, reference}}
+                    (`reference` = dados ABNT informados por você, opcional)
 - meta.json ....... {embedding_model}: embeddings de modelos diferentes não
                     são comparáveis; trocar EMBEDDING_MODEL exige reindexar.
 
@@ -26,7 +27,7 @@ import re
 import tempfile
 import unicodedata
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,9 @@ class ManifestEntry:
     docname: str
     source: str
     added_at: str
+    # Dados bibliográficos (dict de abnt.BibReference.to_dict). Opcional para
+    # manter compatível o manifesto gravado por versões anteriores.
+    reference: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -215,7 +219,19 @@ class LibraryRepository:
             added_at=self._clock().isoformat(timespec="seconds"),
         )
 
+    def set_reference(self, sha256: str, reference: dict[str, Any] | None) -> ManifestEntry:
+        manifest = self.load_manifest()
+        if sha256 not in manifest:
+            raise LibraryError("Documento não encontrado no acervo.")
+        manifest[sha256] = replace(manifest[sha256], reference=reference)
+        self.save_manifest(manifest)
+        return manifest[sha256]
+
     # --- índice (Docs) ------------------------------------------------------
+    def new_docs(self) -> Any:
+        """Coleção vazia (usada para restringir a busca a um documento)."""
+        return self._docs_factory()
+
     def _check_embedding_model(self) -> None:
         if not self.embedding_model or not self.meta_path.exists():
             return

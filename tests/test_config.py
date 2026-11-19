@@ -140,3 +140,13 @@ def test_missing_api_key():
     assert missing_api_key(cfg, {}) == "ANTHROPIC_API_KEY"
     assert missing_api_key(cfg, {"ANTHROPIC_API_KEY": "x"}) == ""
     assert missing_api_key(load_config({}, ROOT), {}) == ""
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("", False), ("true", True), ("sim", True), ("0", False)])
+def test_citation_uppercase(raw, expected):
+    assert load_config({"CITATION_UPPERCASE": raw}, Path("/x")).citation_uppercase is expected
+
+
+def test_citation_uppercase_invalido():
+    with pytest.raises(ConfigError, match="CITATION_UPPERCASE"):
+        load_config({"CITATION_UPPERCASE": "talvez"}, Path("/x"))

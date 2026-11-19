@@ -42,6 +42,7 @@ services:
       PQA_HOME: /app/.pqa
       CONTACT_EMAIL: ${CONTACT_EMAIL:-}
       ANSWER_LANGUAGE: ${ANSWER_LANGUAGE:-português do Brasil}
+      CITATION_UPPERCASE: ${CITATION_UPPERCASE:-false}
     volumes:
       - pdfs:/app/documentos
       - pqa_index:/app/.pqa

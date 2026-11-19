@@ -81,9 +81,9 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
 | RF-20 | Responder no idioma configurado (`ANSWER_LANGUAGE`, padrão português do Brasil) | Alta | Parcial (instrução no fim da pergunta; modelos pequenos podem ignorar) |
 | RF-21 | Mostrar os trechos usados como fonte, com documento de origem e relevância | Alta | Implementado |
 | RF-22 | Baixar a resposta em Markdown, com pergunta, resposta, referências, data e modelo | Alta | Implementado |
-| RF-23 | Exportar as referências em ABNT (NBR 6023) e BibTeX | Alta | Proposto |
+| RF-23 | Exportar as referências em ABNT (NBR 6023) e BibTeX | Alta | Parcial: ABNT implementado (RF-37); BibTeX proposto |
 | RF-24 | Guardar o histórico de perguntas e respostas | Média | Proposto |
-| RF-25 | Modos de escrita: resumo de um documento, revisão de literatura sobre um tema e comparação entre autores | Média | Proposto |
+| RF-25 | Modos de escrita: resumo de um documento, revisão de literatura sobre um tema e comparação entre autores | Média | Parcial: resumo e texto por seções implementados (RF-34); comparação entre autores proposta |
 
 ### 2.4 Operação
 
@@ -97,6 +97,10 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
 | RF-31 | Modelo de resumo separado (`SUMMARY_LLM_MODEL`) e embedding configurável, incluindo `ollama/...` | Média | Implementado |
 | RF-32 | Ajustar o tamanho da resposta e a quantidade de trechos e fontes (`ANSWER_LENGTH`, `EVIDENCE_K`, `ANSWER_MAX_SOURCES`) | Média | Implementado |
 | RF-33 | Mostrar se a IA configurada está pronta: Ollama consultado; na nuvem, conferência da chave sem gerar custo | Alta | Implementado |
+| RF-34 | Três modos de uso: Pergunta, Resumo de documento (busca restrita ao documento) e Texto acadêmico (uma busca por seção) | Alta | Implementado (falta teste real com IA) |
+| RF-35 | Instruções à IA em português acadêmico: norma culta, linguagem impessoal, sem inventar dados | Alta | Implementado |
+| RF-36 | Informar os dados bibliográficos de cada documento (livro, artigo, documento on-line); preencher a partir do catálogo nos PDFs baixados | Alta | Implementado |
+| RF-37 | Citações no texto no padrão NBR 10520:2023, como (Silva, 2020, p. 15), com opção de caixa alta (`CITATION_UPPERCASE`), e lista de REFERÊNCIAS em ordem alfabética montada pelo código | Alta | Implementado (formato das referências NBR 6023 não conferido no texto oficial) |
 
 ## 3. Requisitos não funcionais
 
@@ -116,7 +120,7 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
 | RNF-10 | Desempenho | A checagem do Ollama não bloqueia a interface por mais de 3 s e fica em cache por 30 s | Implementado |
 | RNF-11 | Portabilidade | Mesmo código no Windows 11 e no Linux (Deepin/Ubuntu), com Python 3.11+. Docker opcional | Implementado |
 | RNF-12 | Manutenibilidade | Código modular em camadas, sem dependências circulares, com módulos de até cerca de 300 linhas (exceto a UI) | Implementado |
-| RNF-13 | Testabilidade | Testes unitários sem rede e sem Ollama (dependências injetadas), rodando com `python -m pytest` | Implementado (126 testes) |
+| RNF-13 | Testabilidade | Testes unitários sem rede e sem Ollama (dependências injetadas), rodando com `python -m pytest` | Implementado (195 testes) |
 | RNF-14 | Reprodutibilidade | Versões de dependências fixadas (lock) | Proposto |
 | RNF-15 | Usabilidade | Interface em português, com mensagens que dizem o que fazer em caso de erro | Implementado |
 | RNF-16 | Integridade acadêmica | Lembrar o usuário de conferir as citações no original | Implementado (aviso no README e no .md exportado) |
@@ -181,6 +185,21 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
   2. O sistema mostra o motivo e a opção "Apagar índice e recomeçar" (RF-29).
   3. Os arquivos ficam em `documentos/` para serem reenviados.
 
+### UC-06: Resumir um documento ou escrever um texto acadêmico com ABNT
+
+- **Ator:** pesquisador
+- **Pré-condição:** acervo com documentos e IA pronta.
+- **Fluxo principal:**
+  1. Em *Dados da referência (ABNT)*, o usuário preenche autor, título, ano e editora ou periódico de cada documento (RF-36).
+  2. Na seção 3, escolhe *Resumo de documento* e o documento, ou *Texto acadêmico*, o tema e as seções (RF-34).
+  3. O sistema consulta o acervo com instruções em português acadêmico (RF-35): para o resumo, só trechos do documento; para o texto, uma busca por seção, mostrando o progresso.
+  4. O código troca as marcas de citação por (Sobrenome, ano, p. X) e monta as REFERÊNCIAS em ordem alfabética (RF-37).
+  5. O usuário baixa o `.md` e revisa citações e páginas no original.
+- **Fluxos alternativos:**
+  - 1a. PDF baixado pela busca: os dados vêm do catálogo e o usuário só confere.
+  - 4a. Documento sem dados ABNT: a citação usa o nome interno e a referência fica marcada como incompleta.
+  - 3a. Falha da IA numa seção: as seções já escritas são mantidas e mostradas.
+
 ## 5. Arquitetura
 
 ### 5.1 Camadas
@@ -193,6 +212,8 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
 ┌───────────── Regra de negócio ─────────────┐ │
 │ research_service.py                         │ │
 │  add_document · ask · reset · build_question│ │
+│ writing_service.py (resumo, texto por seções)│ │
+│ abnt.py · citations.py · academic_prompts.py │ │
 └───────┬───────────────────────┬────────────┘ │
         │                       │              │
 ┌──── Dados ──────────┐ ┌── Integrações ────────────────────────────────┐
@@ -270,9 +291,13 @@ As dependências seguem num só sentido (UI → serviço → dados/integrações
 | RF-13 | `search/unpaywall.py`, `search/parsing.scielo_pid` | `tests/test_academic_search.py` |
 | RF-14 | `search/download.download_pdf` | `tests/test_academic_search.py` |
 | RF-19, RF-20 | `research_service.build_question` | `tests/test_research_service.py` |
-| RF-22 | `export.answer_to_markdown` | `tests/test_export_and_ui.py` |
+| RF-22 | `export.answer_to_markdown`, `export.document_to_markdown` | `tests/test_export_and_ui.py` |
 | RF-26 | `ollama_health.check_ollama` | `tests/test_ollama_health.py` |
 | RF-28 | `library._check_embedding_model` | `tests/test_library.py` |
 | RNF-02, RF-30 | `providers.py`, `config.load_config`, `llm_settings.build_settings` | `tests/test_providers.py`, `tests/test_config.py`, `tests/test_llm_settings.py` |
 | RF-33 | `llm_health.check_llm` | `tests/test_llm_health.py` |
+| RF-34 | `writing_service.AcademicWriter` | `tests/test_writing_service.py` |
+| RF-35 | `academic_prompts`, `llm_settings.settings_for_mode` | `tests/test_academic_prompts.py`, `tests/test_llm_settings.py` |
+| RF-36 | `abnt.build_reference`, `abnt.prefill_from_catalog`, `library.set_reference` | `tests/test_abnt.py`, `tests/test_library.py` |
+| RF-37 | `abnt.format_reference`, `citations.format_answer` | `tests/test_abnt.py`, `tests/test_citations.py`, `tests/test_research_service.py` |
 | RNF-08 | `research_service.add_document` | `tests/test_research_service.py` |

@@ -115,3 +115,45 @@ def test_build_question_rejeita_invalidas(bad):
 
 def test_build_question_sem_idioma():
     assert build_question("O que é RAG?", "") == "O que é RAG?"
+
+
+class CitingDocs(FakeDocs):
+    async def aquery(self, question, settings=None):
+        from types import SimpleNamespace as NS
+
+        doc = NS(docname="Silva 2024", formatted_citation="c")
+        ctx = NS(id="pqac-abcdefgh", text=NS(name="Silva 2024 pages 4-5", doc=doc))
+        return NS(raw_answer="Achado (pqac-abcdefgh).", contexts=[ctx])
+
+
+def test_ask_devolve_texto_com_citacao_abnt(tmp_path):
+    repo = LibraryRepository(tmp_path / "acervo", tmp_path / "docs", CitingDocs)
+    service = ResearchService(repo, CitingDocs(), settings="S", citation_uppercase=True)
+    stored = service.store_file("a.pdf", PDF)
+    asyncio.run(service.add_document(stored.path, stored.sha256, source="upload"))
+    service.set_reference(stored.sha256, {"doc_type": "livro", "title": "T", "year": "2024",
+                                          "authors": "Ana Silva"})
+
+    result = asyncio.run(service.ask("Qual o achado?", "pt"))
+
+    assert result.formatted.text == "Achado (SILVA, 2024, p. 4-5)."
+    assert result.formatted.references[0].startswith("SILVA, Ana. **T**.")
+
+
+def test_set_reference_invalida_nao_grava(tmp_path):
+    from ipeia_academico.abnt import BibReferenceError
+
+    service, repo = make_service(tmp_path, FakeDocs())
+    stored = service.store_file("a.pdf", PDF)
+    asyncio.run(service.add_document(stored.path, stored.sha256, source="upload"))
+    with pytest.raises(BibReferenceError):
+        service.set_reference(stored.sha256, {"title": "", "year": "2020"})
+    assert repo.load_manifest()[stored.sha256].reference is None
+
+
+def test_referencia_antiga_invalida_e_ignorada(tmp_path):
+    service, repo = make_service(tmp_path, FakeDocs())
+    stored = service.store_file("a.pdf", PDF)
+    asyncio.run(service.add_document(stored.path, stored.sha256, source="upload"))
+    repo.set_reference(stored.sha256, {"title": "sem ano"})
+    assert service.references_by_docname() == {}

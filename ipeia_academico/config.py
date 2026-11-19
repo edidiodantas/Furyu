@@ -51,6 +51,7 @@ class AppConfig:
     answer_length: str
     evidence_k: int
     answer_max_sources: int
+    citation_uppercase: bool = False
 
     @property
     def llm_name(self) -> str:
@@ -142,6 +143,17 @@ def _temperature(env: Mapping[str, str], provider: Provider) -> float | None:
     return value
 
 
+def _bool(env: Mapping[str, str], key: str, default: bool) -> bool:
+    raw = _get(env, key).lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "sim", "yes"):
+        return True
+    if raw in ("0", "false", "nao", "não", "no"):
+        return False
+    raise ConfigError(f"{key} deve ser true ou false (recebido: {raw!r}).")
+
+
 def load_config(env: Mapping[str, str], root: Path) -> AppConfig:
     """Monta o AppConfig a partir de um Mapping de variáveis de ambiente.
 
@@ -184,6 +196,8 @@ def load_config(env: Mapping[str, str], root: Path) -> AppConfig:
         answer_length=_get(env, "ANSWER_LENGTH", DEFAULT_ANSWER_LENGTH),
         evidence_k=_positive_int(env, "EVIDENCE_K", DEFAULT_EVIDENCE_K, 100),
         answer_max_sources=_positive_int(env, "ANSWER_MAX_SOURCES", DEFAULT_ANSWER_MAX_SOURCES, 50),
+        # NBR 10520:2023 usa (Silva, 2020); algumas instituições ainda pedem (SILVA, 2020).
+        citation_uppercase=_bool(env, "CITATION_UPPERCASE", False),
     )
 
 

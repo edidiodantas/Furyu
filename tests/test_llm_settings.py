@@ -60,3 +60,18 @@ def test_parametros_de_resposta(tmp_path):
     config = load_config(env, Path("/x"))
     a = build_settings(config).answer
     assert (a.evidence_k, a.answer_max_sources, a.answer_length) == (20, 8, "cerca de 800 palavras")
+
+
+def test_prompts_academicos_e_settings_por_modo(tmp_path):
+    from ipeia_academico.academic_prompts import ACADEMIC_SYSTEM_PROMPT, Mode
+    from ipeia_academico.llm_settings import settings_for_mode
+
+    config = load_config({"PDF_DIR": str(tmp_path), "PQA_HOME": str(tmp_path / "pqa"), "EVIDENCE_K": "8"},
+                         Path("/x"))
+    base = build_settings(config)
+    summary = settings_for_mode(base, config, Mode.SUMMARY)
+
+    assert base.prompts.system == ACADEMIC_SYSTEM_PROMPT
+    assert summary.answer.evidence_k == 15 and "600" in summary.answer.answer_length
+    assert base.answer.evidence_k == 8  # a cópia não altera as Settings base
+    assert settings_for_mode(base, config, Mode.QUESTION).answer.answer_length == config.answer_length
