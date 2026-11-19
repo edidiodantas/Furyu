@@ -1,0 +1,4 @@
+# Dependências só para desenvolvimento/testes.
+-r requirements.txt
+pytest>=8
+ruff>=0.6

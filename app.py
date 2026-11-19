@@ -1,395 +1,220 @@
-"""
-AcervoQA — pesquisa e leitura de artigos científicos no PC
-(PaperQA2 + Streamlit + Ollama, 100% local, custo zero).
+"""IPeia Acadêmico: interface Streamlit (camada de entrada).
 
-Importante:
-- Configure llm, summary_llm, agent_llm E enrichment_llm para ollama/...
-- Sem agent_llm_config, o PaperQA2 tenta OpenAI (GPT-4o) por padrão.
-- Sem enrichment_llm_config, o parser multimodal também tenta OpenAI.
-- paper_directory no Settings é ignorado; o caminho certo é agent.index.
-- Embeddings usam sentence-transformers (st-*), sem API paga.
+Só cuida de tela e de ligar as peças. Regra de negócio fica em
+`ipeia_academico/research_service.py`; acesso a disco em `library.py`;
+rede em `ipeia_academico/search/`.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
-import re
-import urllib.error
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
-from paperqa import Docs, Settings
-from paperqa.settings import (
-    AgentSettings,
-    AnswerSettings,
-    IndexSettings,
-    ParsingSettings,
-)
+from paperqa import Docs
 
-from academic_search import (
+from ipeia_academico.async_runner import BackgroundLoop
+from ipeia_academico.config import AppConfig, ConfigError, load_config
+from ipeia_academico.export import answer_to_markdown, extract_answer_text, extract_references
+from ipeia_academico.library import (
+    ALLOWED_EXTENSIONS,
+    InvalidDocumentError,
+    LibraryError,
+    LibraryRepository,
+    sha256_bytes,
+)
+from ipeia_academico.llm_settings import build_settings
+from ipeia_academico.ollama_health import OllamaHealth, check_ollama
+from ipeia_academico.research_service import IndexOutcome, QuestionError, ResearchService
+from ipeia_academico.search import (
+    SearchError,
     download_pdf,
     resolve_pdf_url,
+    safe_pdf_filename,
     search_academic,
-    _safe_filename,
 )
+from ipeia_academico.ui_helpers import escape_markdown, format_score, hit_button_key
 
-# ---------------------------------------------------------------------------
-# Ambiente
-# ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / ".env")
-
-# Evita fallback acidental para a API paga se a chave existir no shell.
-os.environ.pop("OPENAI_API_KEY", None)
-
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:9b")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "st-multi-qa-MiniLM-L6-cos-v1")
+APP_NAME = "IPeia Acadêmico"
 
 
-def _path_from_env(key: str, default: str) -> Path:
-    raw = Path(os.getenv(key, default))
-    return raw if raw.is_absolute() else (ROOT / raw)
+# ---------------------------------------------------------------------------
+# Inicialização (uma vez por processo)
+# ---------------------------------------------------------------------------
+def _bootstrap_config() -> AppConfig:
+    load_dotenv(ROOT / ".env")
+    # Evita fallback acidental para a API paga se a chave existir no shell.
+    os.environ.pop("OPENAI_API_KEY", None)
+    config = load_config(os.environ, ROOT)
+    config.pdf_dir.mkdir(parents=True, exist_ok=True)
+    config.pqa_home.mkdir(parents=True, exist_ok=True)
+    os.environ["PQA_HOME"] = str(config.pqa_home.resolve())
+    return config
 
 
-PDF_DIR = _path_from_env("PDF_DIR", "./documentos")
-PQA_HOME = _path_from_env("PQA_HOME", "./.pqa")
-CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "").strip()
-S2_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
-
-# LiteLLM usa o prefixo "ollama/" + nome do modelo no Ollama
-LLM_NAME = f"ollama/{OLLAMA_MODEL}"
-
-PDF_DIR.mkdir(parents=True, exist_ok=True)
-PQA_HOME.mkdir(parents=True, exist_ok=True)
-os.environ["PQA_HOME"] = str(PQA_HOME.resolve())
+@st.cache_resource
+def get_loop() -> BackgroundLoop:
+    return BackgroundLoop()
 
 
-def build_ollama_llm_config(model_name: str, base_url: str) -> dict:
-    """Config LiteLLM Router para o Ollama local (obrigatório para evitar OpenAI)."""
-    return {
-        "model_list": [
-            {
-                "model_name": model_name,
-                "litellm_params": {
-                    "model": model_name,
-                    "api_base": base_url,
-                    "api_type": "ollama",
-                    "timeout": 600,
-                    "temperature": 0.0,
-                },
-            }
-        ]
-    }
-
-
-def get_settings() -> Settings:
-    """Settings PaperQA2 100% locais: Ollama (LLM) + sentence-transformers (embeddings)."""
-    llm_config = build_ollama_llm_config(LLM_NAME, OLLAMA_BASE_URL)
-    pdf_dir = str(PDF_DIR.resolve())
-    index_dir = str((PQA_HOME / "indexes").resolve())
-
-    return Settings(
-        llm=LLM_NAME,
-        llm_config=llm_config,
-        summary_llm=LLM_NAME,
-        summary_llm_config=llm_config,
-        embedding=EMBEDDING_MODEL,
-        agent=AgentSettings(
-            agent_llm=LLM_NAME,
-            agent_llm_config=llm_config,
-            timeout=1800.0,
-            index=IndexSettings(
-                paper_directory=pdf_dir,
-                index_directory=index_dir,
-                concurrency=1,
-            ),
-        ),
-        parsing=ParsingSettings(
-            # Sem isto, o PaperQA2 enriquece figuras/tabelas com GPT-4o.
-            enrichment_llm=LLM_NAME,
-            enrichment_llm_config=llm_config,
-            multimodal=False,
-        ),
-        answer=AnswerSettings(
-            max_concurrent_requests=1,
-        ),
+@st.cache_resource
+def get_service(_config: AppConfig) -> ResearchService:
+    """Um serviço por processo: o acervo é carregado do disco só uma vez."""
+    repo = LibraryRepository(
+        _config.library_dir, _config.pdf_dir, Docs, embedding_model=_config.embedding_model
     )
+    return ResearchService(repo, repo.load_docs(), build_settings(_config))
 
 
-def ollama_status() -> tuple[bool, str]:
-    """Checa se o servidor Ollama responde e se o modelo está instalado."""
-    try:
-        with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=3) as resp:
-            payload = json.loads(resp.read().decode("utf-8") or "{}")
-    except urllib.error.URLError as exc:
-        return False, f"Ollama inacessível em {OLLAMA_BASE_URL} ({exc.reason})"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Falha ao consultar Ollama: {exc}"
-
-    names = []
-    for item in payload.get("models", []):
-        name = item.get("name") or item.get("model") or ""
-        names.append(name)
-        if name == OLLAMA_MODEL or name.startswith(f"{OLLAMA_MODEL}:"):
-            return True, f"Ollama ok · modelo `{OLLAMA_MODEL}` encontrado"
-
-    if names:
-        preview = ", ".join(names[:8])
-        return False, (
-            f"Ollama ok, mas `{OLLAMA_MODEL}` não está em `ollama list`. "
-            f"Instale com: `ollama pull {OLLAMA_MODEL}`. Disponíveis: {preview}"
-        )
-    return False, "Ollama respondeu, mas nenhum modelo está instalado."
+@st.cache_data(ttl=30, show_spinner=False)
+def get_ollama_health(base_url: str, model: str) -> OllamaHealth:
+    # Cache de 30 s: antes a checagem rodava a cada clique e travava até 3 s
+    # quando o Ollama estava desligado.
+    return check_ollama(base_url, model)
 
 
 def init_session_state() -> None:
-    if "docs" not in st.session_state:
-        st.session_state.docs = Docs()
-    if "indexed_files" not in st.session_state:
-        st.session_state.indexed_files = set()
-    if "search_hits" not in st.session_state:
-        st.session_state.search_hits = []
-    if "search_note" not in st.session_state:
-        st.session_state.search_note = ""
-    if "last_answer" not in st.session_state:
-        st.session_state.last_answer = None
-
-
-async def index_pdf(path: Path, settings: Settings) -> None:
-    await st.session_state.docs.aadd(str(path), settings=settings)
-
-
-async def ask_question(question: str, settings: Settings):
-    return await st.session_state.docs.aquery(question, settings=settings)
-
-
-def run_async(coro):
-    """Executa corrotinas no Streamlit sem brigar com o event loop da UI."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    # Streamlit já tem loop: asyncio.run() na mesma thread quebra.
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    st.session_state.setdefault("search_hits", [])
+    st.session_state.setdefault("search_note", "")
+    st.session_state.setdefault("last_answer", None)
+    st.session_state.setdefault("last_question", "")
+    # Arquivos que falharam nesta sessão: não reprocessar a cada rerun.
+    st.session_state.setdefault("failed_uploads", set())
 
 
 # ---------------------------------------------------------------------------
-# UI
+# Seções da tela
 # ---------------------------------------------------------------------------
-st.set_page_config(
-    page_title="AcervoQA",
-    page_icon="📄",
-    layout="wide",
-    menu_items={
-        "Get help": None,
-        "Report a bug": None,
-        "About": "AcervoQA — pesquisa e leitura de artigos científicos no PC (IA local, Ollama).",
-    },
-)
-
-init_session_state()
-settings = get_settings()
-ollama_ok, ollama_msg = ollama_status()
-
-# ---------------------------------------------------------------------------
-# Customização visual
-# ---------------------------------------------------------------------------
-BOOK_SVG = """
-<svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:16px;">
-  <path d="M12 6.5C10.5 5.5 7.5 4 4 4v12.5c3.5 0 6.5 1 8 2" stroke="#1f77b4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M12 6.5c1.5-1 4.5-2.5 8-2.5v12.5c-3.5 0-6.5 1-8 2" stroke="#1f77b4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M12 6.5v12" stroke="#1f77b4" stroke-width="1.8" stroke-linecap="round"/>
-  <path d="M12 18.5c-1.5-1-4.5-2-8-2" stroke="#1f77b4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M12 18.5c1.5-1 4.5-2 8-2" stroke="#1f77b4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-"""
-
-_UBUNTU_CSS = (ROOT / "assets" / "fonts.css").read_text(encoding="utf-8")
-st.html(
-    f"""
-    <style>
-    {_UBUNTU_CSS}
-    /* Fonte Ubuntu para textos, sem sobrescrever ícones Material */
-    body {{
-        font-family: 'Ubuntu', sans-serif;
-    }}
-    [data-testid="stIconMaterial"] {{
-        font-family: 'Material Symbols Rounded' !important;
-    }}
-    /* Remove o header padrão do Streamlit */
-    header[data-testid="stHeader"] {{
-        display: none !important;
-    }}
-    /* Cola o app no topo da janela */
-    .stApp {{
-        margin-top: 0 !important;
-        padding-top: 0 !important;
-    }}
-    /* Reduz o padding superior do container principal */
-    .block-container {{
-        padding-top: 0 !important;
-        padding-bottom: 0.5rem !important;
-    }}
-    .main .block-container {{
-        padding-top: 0 !important;
-    }}
-    .app-title {{
-        display: flex;
-        align-items: center;
-        font-family: 'Ubuntu', sans-serif !important;
-        font-weight: 700 !important;
-        font-size: 4.2rem;
-        color: #1f77b4;
-        margin-top: 0;
-        margin-bottom: 0.15rem;
-        line-height: 1;
-    }}
-    .app-title svg {{
-        flex-shrink: 0;
-        width: 90px;
-        height: 90px;
-    }}
-    </style>
-    """
-)
-
-st.markdown(
-    f'<div class="app-title">{BOOK_SVG}AcervoQA</div>',
-    unsafe_allow_html=True,
-)
-st.caption("Pesquisa e leitura de artigos científicos no seu computador.")
-st.caption(
-    f"Modelo: `{OLLAMA_MODEL}` · Embeddings: `{EMBEDDING_MODEL}` · "
-    f"Ollama: `{OLLAMA_BASE_URL}`"
-)
-
-if ollama_ok:
-    st.success(ollama_msg)
-else:
-    st.error(ollama_msg)
-
-with st.sidebar:
-    st.header("Configuração")
-    st.markdown(
-        f"""
-        - **LLM / summary / agent / enrichment**: `{LLM_NAME}`
-        - **Embeddings**: local (`st-*`)
-        - **PDFs**: `{PDF_DIR}`
-        - **PQA_HOME**: `{PQA_HOME}`
-
-        Troque o modelo no arquivo `.env` (`OLLAMA_MODEL`) para
-        `qwen3.5:4b` ou `qwen3.5:2b` se estiver lento demais.
-        """
+def render_header(config: AppConfig, health: OllamaHealth) -> None:
+    css = (ROOT / "assets" / "fonts.css").read_text(encoding="utf-8")
+    st.html(
+        f"""<style>
+        {css}
+        body {{ font-family: 'Ubuntu', sans-serif; }}
+        [data-testid="stIconMaterial"] {{ font-family: 'Material Symbols Rounded' !important; }}
+        header[data-testid="stHeader"] {{ display: none !important; }}
+        .block-container {{ padding-top: 1rem !important; padding-bottom: 0.5rem !important; }}
+        .app-title {{ font-family: 'Ubuntu', sans-serif; font-weight: 700; font-size: 3.2rem;
+                      color: #1f77b4; line-height: 1.1; margin: 0 0 .2rem 0; }}
+        </style>"""
     )
-    st.warning(
-        "A primeira resposta pode levar alguns minutos (carga do modelo). "
-        "Não feche a aba. Isso é normal em PC local."
+    st.markdown(f'<div class="app-title">📚 {APP_NAME}</div>', unsafe_allow_html=True)
+    st.caption("Pesquisa, leitura e escrita acadêmica com IA local, a partir do seu acervo.")
+    st.caption(
+        f"Modelo: `{config.ollama_model}` · Embeddings: `{config.embedding_model}` · "
+        f"Ollama: `{config.ollama_base_url}`"
     )
-    if st.button("Limpar Sessão", type="secondary", use_container_width=True):
-        st.session_state.docs = Docs()
-        st.session_state.indexed_files = set()
-        st.session_state.search_hits = []
-        st.session_state.search_note = ""
-        st.session_state.last_answer = None
-        st.success("Sessão limpa.")
-        st.rerun()
+    (st.success if health.ok else st.error)(health.message)
 
-# --- Enviar PDFs ---
-st.subheader("1. Enviar PDFs")
-uploaded = st.file_uploader(
-    "Selecione um ou mais PDFs",
-    type=["pdf"],
-    accept_multiple_files=True,
-    help="Apenas arquivos PDF. Cada um é lido e indexado nesta sessão.",
-)
 
-if uploaded:
-    for f in uploaded:
-        dest = PDF_DIR / Path(f.name).name
-        if f.name in st.session_state.indexed_files:
-            st.info(f"Já indexado: {f.name}")
-            continue
-        dest.write_bytes(f.getbuffer())
-        with st.status(
-            f"Indexando `{f.name}` com Ollama + embeddings locais… "
-            "(pode demorar)",
-            expanded=True,
-        ) as status:
-            st.write("Salvando arquivo…")
-            st.write("Extraindo texto e gerando embeddings locais…")
-            st.write("Inferindo metadados via modelo Ollama (lento)…")
+def render_sidebar(config: AppConfig, service: ResearchService) -> None:
+    with st.sidebar:
+        st.header("Acervo")
+        docs = service.list_documents()
+        st.caption(f"{len(docs)} documento(s) indexado(s), salvos em disco.")
+        with st.expander("Ver documentos", expanded=False):
+            for entry in docs:
+                st.markdown(f"- **{escape_markdown(entry.docname)}**  \n  `{entry.filename}`")
+        st.markdown(
+            f"- **LLM (4 papéis)**: `{config.llm_name}`\n"
+            f"- **Arquivos**: `{config.pdf_dir}`\n"
+            f"- **Índice**: `{config.library_dir}`\n"
+            f"- **Idioma das respostas**: {config.answer_language}"
+        )
+        st.warning("A primeira resposta pode levar minutos (carga do modelo). Não feche a aba.")
+
+        if st.button("Limpar resposta", use_container_width=True):
+            st.session_state.last_answer = None
+            st.session_state.search_hits = []
+            st.session_state.search_note = ""
+            st.rerun()
+
+        st.divider()
+        confirm = st.checkbox("Quero apagar o índice do acervo")
+        if st.button("Apagar índice", type="secondary", disabled=not confirm, use_container_width=True):
+            service.reset_library()
+            st.session_state.last_answer = None
+            st.success("Índice apagado. Os arquivos em documentos/ continuam no disco.")
+            st.rerun()
+
+
+def _index_file(service: ResearchService, path: Path, digest: str, source: str) -> None:
+    result = get_loop().run(service.add_document(path, digest, source=source))
+    if result.outcome is IndexOutcome.ALREADY_INDEXED:
+        st.info(f"Já estava no acervo: {result.filename}")
+    else:
+        st.success(f"Indexado: {result.docname or result.filename}")
+
+
+def render_upload(service: ResearchService, ollama_ok: bool) -> None:
+    st.subheader("1. Enviar documentos (artigos e livros)")
+    exts = [e.lstrip(".") for e in ALLOWED_EXTENSIONS]
+    uploaded = st.file_uploader(
+        f"Selecione arquivos ({', '.join(exts)})",
+        type=exts,
+        accept_multiple_files=True,
+        help="Os arquivos ficam no seu computador e o índice é salvo em disco.",
+        disabled=not ollama_ok,
+    )
+    for f in uploaded or []:
+        data = f.getvalue()
+        digest = sha256_bytes(data)
+        if digest in st.session_state.failed_uploads or service.is_indexed(digest):
+            continue  # Streamlit reenvia a lista a cada rerun; só processa o que é novo
+        with st.status(f"Processando `{f.name}`… (pode demorar)", expanded=True) as status:
             try:
-                run_async(index_pdf(dest, settings))
-                st.session_state.indexed_files.add(f.name)
-                status.update(label=f"Indexado: {f.name}", state="complete")
-            except Exception as exc:  # noqa: BLE001
+                stored = service.store_file(f.name, data)
+                st.write("Extraindo texto, gerando embeddings e metadados…")
+                _index_file(service, stored.path, stored.sha256, source="upload")
+                status.update(label=f"Pronto: {f.name}", state="complete")
+            except (InvalidDocumentError, LibraryError) as exc:
+                st.session_state.failed_uploads.add(digest)
+                status.update(label=f"Rejeitado: {f.name}", state="error")
+                st.error(str(exc))
+            except Exception as exc:  # noqa: BLE001 (erros do PaperQA/LiteLLM são variados)
+                st.session_state.failed_uploads.add(digest)
                 status.update(label=f"Erro ao indexar {f.name}", state="error")
                 st.error(f"Falha: {exc}")
 
-if st.session_state.indexed_files:
-    st.success(
-        "Documentos na sessão: "
-        + ", ".join(sorted(st.session_state.indexed_files))
+
+def render_search(config: AppConfig, service: ResearchService, ollama_ok: bool) -> None:
+    st.subheader("2. Buscar artigos (acesso aberto)")
+    st.caption(
+        "Sem login. Começa no **Oasisbr (IBICT)**; se não houver resultado, usa "
+        "Semantic Scholar e Crossref. Unpaywall só para achar PDF **aberto**. Paywall não é baixado."
     )
-else:
-    st.info("Nenhum PDF indexado ainda.")
+    query = st.text_input("Tema ou título", placeholder="Ex.: educação inclusiva Brasil")
+    clicked = st.button("Buscar", type="secondary")
+    if not config.contact_email:
+        st.caption("Dica: defina um e-mail real em CONTACT_EMAIL no `.env` para o Unpaywall achar mais PDFs.")
 
-# --- Busca acadêmica (acesso aberto) ---
-st.subheader("2. Buscar artigos (acesso aberto)")
-st.caption(
-    "Não há login. A busca começa no **Oasisbr (IBICT)**, que reúne SciELO, "
-    "repositórios e periódicos brasileiros. Se o Oasisbr falhar, usa Semantic Scholar/Crossref. "
-    "Unpaywall só entra para achar PDF **aberto**. Paywall não é baixado."
-)
-search_q = st.text_input(
-    "Tema ou título",
-    placeholder="Ex.: educação inclusiva Brasil  OR  photosynthesis chlorophyll",
-    key="search_query",
-)
-col_a, col_b = st.columns([1, 3])
-with col_a:
-    search_clicked = st.button("Buscar", type="secondary", use_container_width=True)
-with col_b:
-    if not CONTACT_EMAIL:
-        st.caption("Dica: defina CONTACT_EMAIL no `.env` para o Unpaywall achar mais PDFs.")
+    if clicked:
+        if not query.strip():
+            st.warning("Digite um tema para buscar.")
+        else:
+            with st.spinner("Consultando catálogos…"):
+                try:
+                    hits, note = search_academic(
+                        query, s2_key=config.semantic_scholar_key, email=config.contact_email
+                    )
+                    st.session_state.search_hits, st.session_state.search_note = hits, note
+                except SearchError as exc:
+                    st.session_state.search_hits, st.session_state.search_note = [], ""
+                    st.error(str(exc))
+            if not st.session_state.search_hits:
+                st.info("Nenhum artigo encontrado. Tente outras palavras.")
 
-if search_clicked:
-    if not search_q.strip():
-        st.warning("Digite um tema para buscar.")
-        st.session_state.search_hits = []
-        st.session_state.search_note = ""
-    else:
-        with st.spinner("Consultando Oasisbr / Unpaywall…"):
-            try:
-                hits, note = search_academic(
-                    search_q.strip(),
-                    s2_key=S2_API_KEY,
-                    email=CONTACT_EMAIL,
-                )
-                st.session_state.search_hits = hits
-                st.session_state.search_note = note
-            except Exception as exc:  # noqa: BLE001
-                st.session_state.search_hits = []
-                st.session_state.search_note = ""
-                st.error(f"Falha na busca: {exc}")
-
-hits: list = st.session_state.search_hits
-if hits:
-    note = st.session_state.get("search_note") or "catálogo público"
-    n_oa = sum(1 for h in hits if h.has_open_pdf)
-    st.write(f"{len(hits)} resultado(s) via {note} · {n_oa} com PDF aberto:")
+    hits = st.session_state.search_hits
+    if not hits:
+        return
+    n_open = sum(1 for h in hits if h.has_open_pdf)
+    st.write(f"{len(hits)} resultado(s) via {st.session_state.search_note} · {n_open} com PDF aberto:")
     for i, hit in enumerate(hits):
         with st.container(border=True):
-            ano = hit.year or "?"
-            st.markdown(f"**{hit.title}** ({ano})")
+            st.markdown(f"**{escape_markdown(hit.title)}** ({hit.year or '?'})")
             if hit.authors:
                 st.caption(hit.authors)
             extra = " · ".join(x for x in (hit.venue, hit.source) if x)
@@ -399,107 +224,144 @@ if hits:
                 st.caption(f"DOI: {hit.doi}")
             if hit.abstract:
                 st.write(hit.abstract)
-            can_index = ollama_ok and hit.has_open_pdf
             if not hit.has_open_pdf:
-                st.caption("Sem PDF aberto. Baixe no SciELO/revista e use Enviar PDFs.")
-            btn_key = f"idx-{i}_{re.sub(r'[^a-zA-Z0-9_-]', '_', (hit.paper_id or hit.doi or hit.title))[:50]}"
+                st.caption("Sem PDF aberto. Baixe no site da revista e use Enviar documentos.")
             if st.button(
                 "Baixar PDF aberto e indexar",
-                key=btn_key,
-                disabled=not can_index,
+                key=hit_button_key(i, hit),
+                disabled=not (ollama_ok and hit.has_open_pdf),
             ):
-                fname = _safe_filename(hit.title, hit.year)
-                if fname in st.session_state.indexed_files:
-                    st.info(f"Já indexado: {fname}")
-                else:
-                    with st.status(f"Obtendo `{fname}`…", expanded=True) as status:
-                        try:
-                            st.write("Resolvendo link de PDF aberto…")
-                            pdf_url = resolve_pdf_url(hit, CONTACT_EMAIL)
-                            if not pdf_url:
-                                raise RuntimeError(
-                                    "Sem PDF em acesso aberto. "
-                                    "Baixe no SciELO/site da revista e use Enviar PDFs."
-                                )
-                            st.write("Baixando…")
-                            dest = download_pdf(pdf_url, PDF_DIR, fname)
-                            st.write("Indexando com Ollama (pode demorar)…")
-                            run_async(index_pdf(dest, settings))
-                            st.session_state.indexed_files.add(dest.name)
-                            status.update(
-                                label=f"Indexado: {dest.name}", state="complete"
-                            )
-                            st.rerun()
-                        except Exception as exc:  # noqa: BLE001
-                            status.update(label="Não foi possível indexar", state="error")
-                            st.error(str(exc))
-elif search_clicked and search_q.strip():
-    st.info("Nenhum artigo encontrado. Tente outras palavras.")
+                _download_and_index(config, service, hit)
 
-# --- Pergunta ---
-st.subheader("3. Pergunta")
-question = st.text_input(
-    "Digite sua pergunta sobre os documentos",
-    placeholder="Ex.: Quais são as principais conclusões do artigo?",
-)
 
-ask_clicked = st.button(
-    "Perguntar",
-    type="primary",
-    disabled=not st.session_state.indexed_files or not question.strip() or not ollama_ok,
-)
-
-if ask_clicked:
-    with st.status(
-        f"Processando com `{OLLAMA_MODEL}` local… "
-        "Não feche a aba. Pode levar 1–3 minutos.",
-        expanded=True,
-    ) as status:
-        st.write("Buscando evidências nos chunks indexados…")
-        st.write("Gerando resumos contextuais (summary_llm via Ollama)…")
-        st.write("Compondo a resposta final com citações…")
+def _download_and_index(config: AppConfig, service: ResearchService, hit) -> None:
+    with st.status("Obtendo PDF…", expanded=True) as status:
         try:
-            session = run_async(ask_question(question.strip(), settings))
-            st.session_state.last_answer = session
-            status.update(label="Resposta pronta", state="complete")
+            url = resolve_pdf_url(hit, config.contact_email)
+            if not url:
+                raise RuntimeError("Sem PDF em acesso aberto. Baixe no site da revista.")
+            path = download_pdf(url, config.pdf_dir, safe_pdf_filename(hit.title, hit.year))
+            digest = sha256_bytes(path.read_bytes())
+            if service.is_indexed(digest):
+                path.unlink(missing_ok=True)  # mesmo conteúdo já está no acervo
+                status.update(label="Este PDF já está no acervo", state="complete")
+                return
+            st.write("Indexando com o Ollama (pode demorar)…")
+            _index_file(service, path, digest, source=f"download:{url}")
+            status.update(label=f"Indexado: {path.name}", state="complete")
         except Exception as exc:  # noqa: BLE001
+            status.update(label="Não foi possível indexar", state="error")
+            st.error(str(exc))
+
+
+def render_question(config: AppConfig, service: ResearchService, ollama_ok: bool) -> None:
+    st.subheader("3. Pergunta")
+    question = st.text_input(
+        "Pergunte sobre o seu acervo",
+        placeholder="Ex.: Quais são as principais conclusões sobre avaliação formativa?",
+    )
+    has_docs = service.has_documents()
+    if not has_docs:
+        st.info("O acervo está vazio. Envie ou baixe documentos acima.")
+    if not st.button("Perguntar", type="primary", disabled=not (has_docs and question.strip() and ollama_ok)):
+        return
+    with st.status(f"Processando com `{config.ollama_model}`… (1 a 3 minutos)", expanded=True) as status:
+        try:
+            st.session_state.last_answer = get_loop().run(service.ask(question, config.answer_language))
+            st.session_state.last_question = question.strip()
+            status.update(label="Resposta pronta", state="complete")
+        except QuestionError as exc:
+            status.update(label="Pergunta inválida", state="error")
+            st.warning(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            st.session_state.last_answer = None
             status.update(label="Erro na consulta", state="error")
             st.error(f"Falha: {exc}")
-            st.session_state.last_answer = None
 
-# --- Resposta ---
-session = st.session_state.last_answer
-if session is not None:
+
+def render_answer(config: AppConfig) -> None:
+    session = st.session_state.last_answer
+    if session is None:
+        return
     st.subheader("4. Resposta")
-    answer_text = getattr(session, "formatted_answer", None) or getattr(
-        session, "answer", str(session)
+    answer = extract_answer_text(session)
+    references = extract_references(session)
+    st.markdown(answer)
+    st.download_button(
+        "Baixar resposta (.md)",
+        data=answer_to_markdown(
+            st.session_state.last_question,
+            answer,
+            references,
+            model=config.ollama_model,
+            generated_at=datetime.now(),
+        ),
+        file_name="resposta-ipeia-academico.md",
+        mime="text/markdown",
     )
-    st.markdown(answer_text)
-    with st.expander("Mostrar Fontes", expanded=False):
+    with st.expander("Mostrar fontes (trechos usados)", expanded=False):
         contexts = getattr(session, "contexts", None) or []
         if not contexts:
-            refs = getattr(session, "references", None)
-            if refs:
-                st.markdown(refs)
-            else:
-                st.write("Nenhuma fonte estruturada retornada.")
-        else:
-            for i, ctx in enumerate(contexts, start=1):
-                text = getattr(ctx, "text", None) or getattr(ctx, "context", ctx)
-                score = getattr(ctx, "score", None)
-                citation = ""
-                if hasattr(text, "doc") and getattr(text, "doc", None):
-                    citation = getattr(text.doc, "citation", "") or getattr(
-                        text.doc, "docname", ""
-                    )
-                elif hasattr(ctx, "text") and hasattr(ctx.text, "name"):
-                    citation = ctx.text.name
-                st.markdown(
-                    f"**Fonte {i}**"
-                    + (f" (relevância: {score})" if score is not None else "")
-                )
-                if citation:
-                    st.caption(citation)
-                body = getattr(text, "text", None) if text is not None else None
-                st.write(body if body is not None else text)
-                st.divider()
+            st.markdown(references or "Nenhuma fonte estruturada retornada.")
+        for i, ctx in enumerate(contexts, start=1):
+            text = getattr(ctx, "text", None)
+            doc = getattr(text, "doc", None)
+            citation = (
+                getattr(doc, "citation", "") or getattr(doc, "docname", "") or getattr(text, "name", "")
+            )
+            score = format_score(getattr(ctx, "score", None))
+            st.markdown(f"**Fonte {i}**" + (f" (relevância: {score})" if score else ""))
+            if citation:
+                st.caption(citation)
+            st.write(getattr(ctx, "context", "") or getattr(text, "text", ""))
+            st.divider()
+
+
+def render_broken_library(config: AppConfig, exc: LibraryError) -> None:
+    """Acervo ilegível: oferece apagar o índice sem precisar mexer em pastas."""
+    st.error(str(exc))
+    if st.checkbox("Entendi: apagar o índice (os arquivos em documentos/ ficam)"):
+        if st.button("Apagar índice e recomeçar", type="primary"):
+            LibraryRepository(config.library_dir, config.pdf_dir, Docs).reset()
+            get_service.clear()
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main() -> None:
+    st.set_page_config(
+        page_title=APP_NAME,
+        page_icon="📚",
+        layout="wide",
+        menu_items={
+            "Get help": None,
+            "Report a bug": None,
+            "About": f"{APP_NAME}: pesquisa acadêmica com IA local.",
+        },
+    )
+    try:
+        config = _bootstrap_config()
+    except ConfigError as exc:
+        st.error(f"Erro no .env: {exc}")
+        st.stop()
+
+    init_session_state()
+    health = get_ollama_health(config.ollama_base_url, config.ollama_model)
+    render_header(config, health)
+
+    try:
+        service = get_service(config)
+    except LibraryError as exc:
+        render_broken_library(config, exc)
+        st.stop()
+
+    render_sidebar(config, service)
+    render_upload(service, health.ok)
+    render_search(config, service, health.ok)
+    render_question(config, service, health.ok)
+    render_answer(config)
+
+
+main()

@@ -21,8 +21,11 @@ if ! command -v ollama &> /dev/null; then
     exit 1
 fi
 
-# Modelos ficam no pendrive, não no SSD
-export OLLAMA_MODELS="/media/Edidio/8662-B4492/ollama-models"
+# Modelos ficam no volume ext4 do pendrive, o mesmo usado por rodar-deepin.sh.
+# (Antes apontava para /media/Edidio/8662-B4492, caminho diferente do resto
+# dos scripts: o modelo era baixado num lugar e procurado em outro.)
+bash "$SCRIPT_DIR/montar-linux-env.sh"
+export OLLAMA_MODELS="$MNT/ollama-models"
 mkdir -p "$OLLAMA_MODELS"
 
 MODEL="${1:-$(grep -E '^OLLAMA_MODEL=' "$PROJECT_ROOT/.env" | cut -d= -f2- || true)}"
@@ -54,5 +57,5 @@ echo
 echo "Pronto. Teste com:"
 echo "  ollama run $MODEL"
 echo
-echo "Para rodar o AcervoQA:"
+echo "Para rodar o IPeia Acadêmico:"
 echo "  bash scripts/rodar-deepin.sh"

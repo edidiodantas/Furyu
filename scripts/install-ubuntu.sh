@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Instala o AcervoQA no Ubuntu (notebook da apresentação)
+# Instala o IPeia Acadêmico no Ubuntu (notebook da apresentação)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
-echo "== AcervoQA · instalação Ubuntu =="
+echo "== IPeia Acadêmico · instalação Ubuntu =="
 echo "Pasta: $PROJECT_ROOT"
 
 if ! command -v python3 &> /dev/null; then

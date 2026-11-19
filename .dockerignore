@@ -12,3 +12,6 @@ __pycache__
 *.md
 scripts
 INSTALAR-DEEPIN.md
+tests
+.pytest_cache
+.ruff_cache

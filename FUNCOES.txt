@@ -1,147 +1,87 @@
-ACERVOQA
-========
-Interface grafica do programa (Streamlit).
-E a mesma tela em Windows e no Linux.
+IPEIA ACADEMICO
+===============
+Interface grafica do programa (Streamlit). A mesma tela no Windows e no Linux.
 
-Sim: a tela ao lado e esta.
-Titulo:  AcervoQA
-         Pesquisa e leitura de artigos cientificos no seu computador.
-Idioma:  textos nossos em portugues.
-         Dois botoes do Streamlit podem ficar em ingles
-         ("Browse files" / menu). Nao mudam o uso.
+Titulo:  IPeia Academico
+         Pesquisa, leitura e escrita academica com IA local, a partir do seu acervo.
 
 
 O QUE O PROGRAMA FAZ
 --------------------
-Voce envia PDFs (ou busca artigos abertos), pergunta em portugues,
-e a IA local responde COM BASE NOS ARQUIVOS, com citacoes.
-Nao usa OpenAI. A leitura do PDF e no PC.
+Voce envia artigos e livros (PDF, TXT, MD, HTML) ou busca artigos abertos,
+pergunta em portugues, e a IA local responde COM BASE NOS ARQUIVOS, com citacoes.
+Nao usa OpenAI. A leitura dos arquivos e no seu PC.
+O ACERVO FICA SALVO EM DISCO: fechar a aba ou reiniciar o PC nao apaga o indice.
 
 
 BARRA SUPERIOR (status)
 -----------------------
 Linha cinza: modelo, embeddings e endereco do Ollama.
-
-Faixa verde:  Ollama ok e o modelo do .env esta instalado.
+Faixa verde:    Ollama ok e o modelo do .env esta instalado.
 Faixa vermelha: Ollama desligado ou modelo errado.
   -> abra o Ollama e rode:  ollama pull qwen3.5:4b
+A checagem e refeita a cada 30 segundos.
 
 
-BARRA LATERAL ESQUERDA — Configuracao
--------------------------------------
-So informacao (nao e formulario).
+BARRA LATERAL — Acervo
+----------------------
+- Quantos documentos estao indexados e "Ver documentos" (lista).
+- Modelo, pasta dos arquivos, pasta do indice e idioma das respostas.
 
-- LLM / summary / agent / enrichment
-    Os 4 papeis de IA, todos no Ollama local.
-- Embeddings
-    Busca de trechos no PDF (modelo pequeno, local).
-- PDFs
-    Pasta onde os arquivos enviados sao gravados.
-- PQA_HOME
-    Pasta do indice interno.
+BOTAO "Limpar resposta"
+  Some com a ultima resposta e os resultados de busca. NAO mexe no acervo.
 
-Aviso amarelo: a 1a resposta pode demorar. Nao feche a aba.
-
-BOTAO "Limpar Sessao"
-  Apaga da memoria os PDFs ja indexados e a ultima resposta.
-  Os arquivos na pasta documentos/ continuam no disco.
-  Use para comecar de novo.
+CAIXA "Quero apagar o indice do acervo" + BOTAO "Apagar indice"
+  Apaga o indice (embeddings e metadados). Os arquivos em documentos/ ficam.
+  Depois disso e preciso reenviar os documentos para indexar de novo.
 
 
-1. ENVIAR PDFS
---------------
-Botao de envio (pode aparecer "Browse files" em ingles).
-Aceita um ou varios PDF.
-
-O que acontece ao enviar:
-  1. Salva o arquivo na pasta documentos
-  2. Extrai o texto
-  3. Gera embeddings locais
-  4. Pede metadados ao Ollama (lento)
-
-Mensagens:
-  "Ja indexado: nome.pdf"     — nao processa de novo nesta sessao
-  "Indexado: nome.pdf"        — pronto para perguntar
-  "Falha: ..."                — erro (PDF danificado, Ollama, etc.)
-  "Documentos na sessao: ..." — lista do que vale para as perguntas
-  "Nenhum PDF indexado ainda."
+1. ENVIAR DOCUMENTOS (ARTIGOS E LIVROS)
+---------------------------------------
+Aceita PDF, TXT, MD e HTML, varios de uma vez, ate 200 MB cada.
+O que acontece:
+  1. Confere formato, tamanho e se o PDF e PDF de verdade
+  2. Salva em documentos/ (sem sobrescrever arquivo de mesmo nome)
+  3. Extrai o texto, gera embeddings locais e pede metadados ao Ollama
+  4. Salva o indice em disco
+Arquivo com o mesmo conteudo de outro ja indexado e ignorado.
+Arquivo que falhou nao e reprocessado sozinho; recarregue a pagina para tentar de novo.
+EPUB e DOCX nao sao aceitos: converta para PDF ou TXT (ex.: Calibre, LibreOffice).
 
 
 2. BUSCAR ARTIGOS (ACESSO ABERTO)
 ---------------------------------
-Usa o Oasisbr (IBICT) — API publica, sem chave, sem login.
-Reune SciELO, repositorios e periodicos brasileiros.
-Se o Oasisbr falhar, tenta Semantic Scholar e Crossref.
-Unpaywall so entra para achar PDF livre (pelo DOI).
-Nao precisa de conta de usuario — so CONTACT_EMAIL no .env.
-
-Caixa "Tema ou titulo" + botao Buscar.
-Lista os artigos; o botao de baixar so liga se houver PDF aberto.
-Botao "Baixar PDF aberto e indexar":
-  baixa o PDF legal e manda para o mesmo indice da secao 1.
-Se nao houver PDF aberto: baixe no SciELO e use Enviar PDFs.
-
-Paywall / Elsevier fechado: o programa NAO baixa.
+Oasisbr (IBICT) primeiro; se nao houver resultado, Semantic Scholar e Crossref.
+Unpaywall so para achar PDF livre pelo DOI (precisa de CONTACT_EMAIL real no .env).
+Se um catalogo falhar, a busca continua nos outros e mostra um aviso.
+Botao "Baixar PDF aberto e indexar": baixa o PDF legal e adiciona ao acervo.
+Paywall: o programa NAO baixa.
 
 
 3. PERGUNTA
 -----------
-Caixa de texto: escreva em portugues.
-Exemplo: Quais sao as principais conclusoes do artigo?
-
-BOTAO "Perguntar"
-  Fica cinza (desligado) se:
-    - nao ha PDF indexado, ou
-    - a caixa esta vazia, ou
-    - o Ollama nao esta ok
-
-  Ao clicar (nao feche a aba):
-    1. Busca trechos relevantes nos PDFs
-    2. Resume cada trecho (summary)
-    3. Monta a resposta final com citacoes
-
-  Pode levar 1 a 3 minutos (ou mais na 1a vez).
+Escreva em portugues. A IA e instruida a responder no idioma do .env (ANSWER_LANGUAGE).
+O botao "Perguntar" fica desligado se o acervo estiver vazio, a caixa vazia
+ou o Ollama fora do ar. Pode levar 1 a 3 minutos (mais na 1a vez).
 
 
 4. RESPOSTA
 -----------
-So aparece depois de uma pergunta com sucesso.
-
-Texto principal: resposta da IA, em geral com citacoes.
-
-BOTAO/AREA "Mostrar Fontes"
-  Abre os trechos usados (Fonte 1, Fonte 2, ...).
-  "relevancia" = quao util aquele trecho foi.
-  Se nao houver lista, pode mostrar so as referencias
-  ou "Nenhuma fonte estruturada retornada."
+Texto da resposta com citacoes.
+BOTAO "Baixar resposta (.md)": salva pergunta, resposta e referencias em Markdown,
+  para colar no seu texto. CONFIRA CADA CITACAO NO DOCUMENTO ORIGINAL.
+"Mostrar fontes": trechos usados, com a relevancia de cada um.
 
 
 O QUE ESTE PROGRAMA NAO FAZ
 ---------------------------
-- Nao traduz PDF sozinho (pergunta em PT sobre texto em PT ou EN).
-- Nao edita o PDF.
-- Nao baixa artigo de paywall (só PDF em acesso aberto).
-- Nao grava historico de perguntas depois de "Limpar Sessao"
-  ou de fechar o navegador.
+- Nao baixa artigo de paywall.
+- Nao gera referencias em ABNT automaticamente (as citacoes vem do PaperQA2).
+- Nao guarda historico de perguntas (use "Baixar resposta").
 - Nao usa chave OpenAI.
-
-
-ORDEM DE USO (resumo)
----------------------
-1. Ollama aberto  (localhost:11434)
-2. streamlit run app.py
-3. Abrir http://localhost:8501
-4. Enviar PDF **ou** Buscar artigo aberto e indexar
-5. Perguntar   -> esperar resposta
-6. Abrir "Mostrar Fontes" se quiser conferir
-7. Limpar Sessao para outro conjunto de PDFs
 
 
 TROCAR O MODELO
 ---------------
-Nao e botao na tela. Edite o arquivo .env:
-
-  OLLAMA_MODEL=qwen3.5:4b
-
-Depois: ollama pull qwen3.5:4b
-e reinicie o Streamlit.
+Edite o .env:  OLLAMA_MODEL=qwen3.5:4b
+Depois: ollama pull qwen3.5:4b  e reinicie o Streamlit.

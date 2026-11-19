@@ -1,6 +1,6 @@
-# Instalação do AcervoQA no Deepin 23.1 (este PC)
+# Instalação do IPeia Acadêmico no Deepin 23.1 (este PC)
 
-O **AcervoQA** é o **mesmo** `app.py` do Windows. Aqui só muda *onde* instalar, para **não usar o SSD**.
+O **IPeia Acadêmico** é o **mesmo** `app.py` do Windows. Aqui só muda *onde* instalar, para **não usar o SSD**.
 
 Detectado neste Deepin:
 
@@ -21,11 +21,11 @@ cd /media/Edidio/8662-B449/paperqa-gui-local
 
 ```bash
 cd /media/Edidio/8662-B449
-git clone https://github.com/edidiodantas/paperqa-gui-local.git
+git clone https://github.com/edidiodantas/Furyu.git paperqa-gui-local
 cd paperqa-gui-local
 ```
 
-Repositório **privado**: faça `gh auth login` antes, se o `git clone` pedir senha.
+O repositório Furyu é público; o nome da pasta `paperqa-gui-local` foi mantido para não quebrar os caminhos dos scripts.
 
 ## 2. Ambiente Python + caches no pendrive
 

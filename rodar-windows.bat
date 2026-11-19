@@ -6,13 +6,13 @@ if not exist ".venv\Scripts\activate.bat" (
   echo ERRO: rode install-windows.bat primeiro.
   exit /b 1
 )
-if not exist "academic_search.py" (
-  echo ERRO: falta academic_search.py. Copie a pasta atual do pendrive.
+if not exist "ipeia_academico\__init__.py" (
+  echo ERRO: falta a pasta ipeia_academico. Copie a pasta inteira do projeto.
   exit /b 1
 )
 
 call .venv\Scripts\activate.bat
-echo AcervoQA — Ollama precisa estar aberto ^(localhost:11434^).
+echo IPeia Academico - Ollama precisa estar aberto ^(localhost:11434^).
 echo Abrindo http://localhost:8501 ...
 streamlit run app.py
 endlocal

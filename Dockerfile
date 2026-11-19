@@ -1,4 +1,4 @@
-# MVP: Streamlit + PaperQA2 (embeddings locais). Ollama fica em outro serviço.
+# IPeia Acadêmico: Streamlit + PaperQA2 (embeddings locais). Ollama fica em outro serviço.
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -23,7 +23,12 @@ RUN pip install --no-cache-dir --upgrade pip \
         -c constraints-cpu.txt \
         -r requirements.txt
 
+# Antes só app.py era copiado: o import de academic_search e assets/fonts.css
+# quebravam o container na primeira execução.
 COPY app.py docker/entrypoint.sh ./
+COPY ipeia_academico ./ipeia_academico
+COPY assets ./assets
+COPY .streamlit ./.streamlit
 RUN chmod +x /app/entrypoint.sh \
     && mkdir -p /app/documentos /app/.pqa /app/.cache/hf
 

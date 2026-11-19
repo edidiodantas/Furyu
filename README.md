@@ -1,140 +1,117 @@
-# AcervoQA
+# IPeia Acadêmico
 
-Pesquisa e leitura de artigos científicos no seu computador.
+Pesquisa, leitura e escrita acadêmica no seu computador, com IA **100% local** (Ollama), sem custo de API e sem enviar seus arquivos para a nuvem.
 
-Interface gráfica para [PaperQA2](https://github.com/Future-House/paper-qa) usando **somente IA local via Ollama** — custo zero, sem OpenAI.
+Você monta um **acervo** com artigos e livros (PDF, TXT, MD, HTML), busca artigos em acesso aberto (Oasisbr/IBICT, Semantic Scholar, Crossref, Unpaywall) e faz perguntas. As respostas trazem citações dos seus documentos e podem ser baixadas em Markdown para usar na escrita.
 
-O **mesmo** `app.py` roda no Windows 11 e no Deepin. Só o jeito de instalar muda.
+Construído sobre o [PaperQA2](https://github.com/Future-House/paper-qa) (Apache 2.0), com interface em Streamlit.
 
-## Levar no pendrive → PC Windows 11 (i7 + SSD)
+> **Atenção acadêmica:** a IA pode errar ou atribuir uma ideia ao documento errado. Confira cada citação no texto original antes de usá-la em um trabalho.
 
-Para a viagem: **Python + Ollama no SSD do Windows**. Instalar os dois não é problema e é mais simples que Docker nesse cenário.
+## Documentação
 
-Guia passo a passo: **[INSTALAR-WINDOWS.md](INSTALAR-WINDOWS.md)**  
-Funções da tela (TXT): **[FUNCOES.txt](FUNCOES.txt)**
+| Documento | Conteúdo |
+| --- | --- |
+| [docs/REQUISITOS.md](docs/REQUISITOS.md) | Especificação de requisitos (RF/RNF, casos de uso, arquitetura) |
+| [docs/ANALISE-TECNICA.md](docs/ANALISE-TECNICA.md) | Revisão do código: falhas encontradas, correções e pendências |
+| [INSTALAR-WINDOWS.md](INSTALAR-WINDOWS.md) | Instalação no Windows 11 |
+| [INSTALAR-DEEPIN.md](INSTALAR-DEEPIN.md) | Instalação no Deepin/Linux com pendrive |
+| [FUNCOES.txt](FUNCOES.txt) | O que cada parte da tela faz |
 
-Resumo: copie `paperqa-gui-local` para `C:\paperqa-gui-local` (não rode no pendrive) → Python 3.12 → Ollama → `install-windows.bat` → `ollama pull qwen3.5:4b` → `rodar-windows.bat`. A tela é a mesma (enviar PDF, buscar Oasisbr, perguntar).
-
-## MVP opcional: Windows + Docker
-
-Docker **não deixa o LLM mais rápido**. Nesta viagem (pendrive → i7 Windows), **pule**. Só use depois se quiser um `docker compose up` como “produto”. Detalhes antigos: `docker compose up --build` e http://localhost:8501.
-
-## Hardware alvo
-
-- **Windows 11:** i7, 8 GB RAM, RTX ~6 GB VRAM → `qwen3.5:9b` (ou 4b se lento)
-- **Deepin 23.1 (este PC):** Ryzen 5 4500, 16 GB RAM, GTX 750 4 GB → use `qwen3.5:4b` (GPU antiga, tende a CPU)
-- Alternativa ainda mais leve: `qwen3.5:2b` no `.env`
-
-## Instalar no Deepin 23 (pendrive, sem SSD)
-
-Não instale venv/modelos no SSD nem no exFAT nativo. Guia completo: **[INSTALAR-DEEPIN.md](INSTALAR-DEEPIN.md)**.
-
-Quando for a hora:
+## Início rápido (Linux / macOS)
 
 ```bash
-cd /media/Edidio/8662-B449/paperqa-gui-local
-bash scripts/setup-deepin.sh
-bash scripts/rodar-deepin.sh
+# 1. Ollama: https://ollama.com/download
+ollama pull qwen3.5:4b
+
+# 2. App
+git clone https://github.com/edidiodantas/Furyu.git ipeia-academico
+cd ipeia-academico
+python3 -m venv .venv && source .venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
+cp .env.example .env        # edite CONTACT_EMAIL se quiser usar o Unpaywall
+
+# 3. Rodar
+streamlit run app.py        # abre em http://localhost:8501
 ```
 
-## Por que `llm="ollama/..."` sozinho não basta
+No Windows, use `install-windows.bat` e `rodar-windows.bat` ([guia](INSTALAR-WINDOWS.md)).
 
-O PaperQA2 usa **quatro** papéis de LLM. O padrão de todos é OpenAI GPT-4o:
+## Estrutura
+
+```
+app.py                      Interface Streamlit (só tela)
+ipeia_academico/
+  config.py                 Lê e valida o .env
+  llm_settings.py           Settings do PaperQA2 com os 4 papéis de LLM no Ollama
+  ollama_health.py          Checa se o Ollama e o modelo estão disponíveis
+  library.py                Acervo persistente: arquivos, índice (docs.pkl) e manifesto
+  research_service.py       Regra de negócio: indexar e perguntar
+  async_runner.py           Event loop único para chamar o PaperQA2 a partir do Streamlit
+  search/                   Busca em catálogos abertos e download de PDF
+    catalogs.py             Oasisbr, Semantic Scholar, Crossref
+    unpaywall.py            PDF aberto pelo DOI
+    download.py             Download com limite de tamanho e checagem %PDF
+    parsing.py              Extração de metadados (funções puras)
+    service.py              Cascata de catálogos + deduplicação
+  export.py                 Exporta a resposta para Markdown
+  ui_helpers.py             Funções puras da interface
+tests/                      Testes unitários (pytest), sem rede e sem Ollama
+docs/                       Requisitos e análise técnica
+scripts/, *.bat, docker/    Instalação e execução
+```
+
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Os testes usam dublês (sem rede, sem Ollama). O teste de `llm_settings` é pulado se o `paper-qa` não estiver instalado.
+
+## Por que configurar os quatro papéis de LLM
+
+O PaperQA2 usa quatro papéis de LLM, e o padrão de todos é um modelo da OpenAI:
 
 | Papel | Setting | Uso |
 | --- | --- | --- |
 | Resposta + metadados | `llm` + `llm_config` | Indexar e responder |
-| Resumos de evidência | `summary_llm` + `summary_llm_config` | `gather_evidence` |
-| Agente (ferramentas) | `agent.agent_llm` + `agent_llm_config` | Escolher ferramentas |
-| Enrichment multimodal | `parsing.enrichment_llm` + `enrichment_llm_config` | Figuras/tabelas |
+| Resumos de evidência | `summary_llm` + `summary_llm_config` | Resumir trechos |
+| Agente | `agent.agent_llm` + `agent_llm_config` | Modo agente |
+| Enriquecimento | `parsing.enrichment_llm` + `enrichment_llm_config` | Figuras/tabelas |
 
-O README oficial do PaperQA mostra só `llm` e `summary_llm` no exemplo Ollama. Sem `agent_llm`, ele cai no GPT-4o ([#731](https://github.com/Future-House/paper-qa/discussions/731), [#1321](https://github.com/Future-House/paper-qa/issues/1321)). Versões recentes também usam `enrichment_llm` (padrão GPT-4o) se o multimodal estiver ligado.
+`ipeia_academico/llm_settings.py` aponta os quatro para o Ollama, e `tests/test_llm_settings.py` garante isso. **Não defina `OPENAI_API_KEY`.**
 
-Este app configura os quatro + `api_base` do Ollama. Embeddings usam `st-*` (sentence-transformers), sem API paga.
+## Onde ficam os dados
 
-**Não defina `OPENAI_API_KEY`.**
+| O quê | Onde (padrão) |
+| --- | --- |
+| Arquivos enviados/baixados | `documentos/` (`PDF_DIR`) |
+| Índice do acervo | `.pqa/acervo/docs.pkl` e `.pqa/acervo/manifest.json` (`PQA_HOME`) |
 
-## 1. Instalar Ollama
+O índice usa `pickle` (forma de salvar documentada pelo PaperQA2). **Nunca carregue um `docs.pkl` recebido de outra pessoa**, porque pickle pode executar código. Se atualizar o `paper-qa` e o índice deixar de abrir, use "Apagar índice" na barra lateral e reindexe.
 
-1. Instale: https://ollama.com/download
-2. Baixe o modelo:
-
-```bash
-ollama pull qwen3.5:9b
-```
-
-Teste:
+## Docker (opcional)
 
 ```bash
-ollama run qwen3.5:9b "Olá"
+docker compose up --build    # http://localhost:8501
 ```
 
-Deixe o Ollama rodando (`http://localhost:11434`).
+As portas ficam presas a `127.0.0.1`. Docker não deixa o LLM mais rápido.
 
-No **Deepin / pendrive** pule as seções 2–3 abaixo e use [INSTALAR-DEEPIN.md](INSTALAR-DEEPIN.md).
-
-## 2. Ambiente Python 3.11+ (Windows / disco NTFS ou ext4)
-
-Não crie `.venv` em pendrive **exFAT**. No Windows, clone para o HD/SSD NTFS.
-
-```bash
-git clone https://github.com/edidiodantas/paperqa-gui-local.git
-cd paperqa-gui-local
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-copy .env.example .env      # Linux: cp .env.example .env
-```
-
-`paper-qa[local,pymupdf]` instala sentence-transformers (embeddings locais) e o parser PDF.
-
-Edite `.env` se quiser trocar o modelo (ex.: `OLLAMA_MODEL=qwen3.5:4b`).
-
-## 3. Rodar a interface
-
-```bash
-streamlit run app.py
-```
-
-Abra o URL local (geralmente http://localhost:8501).
-
-## Uso
-
-1. Faça upload de PDFs **ou** busque um artigo aberto (seção 2 da tela).
-2. Aguarde a indexação (status na tela — será lento no 9B).
-3. Digite a pergunta e clique em **Perguntar**.
-4. Veja a resposta com citações e abra **Mostrar Fontes**.
-5. Use **Limpar Sessão** na barra lateral para recomeçar.
-
-A busca acadêmica **não pede login**. Começa no **Oasisbr (IBICT)** — API pública e grátis, com SciELO e repositórios brasileiros. Se o Oasisbr falhar, usa Semantic Scholar/Crossref. O Unpaywall só entra para PDF em acesso aberto. No `.env`: `CONTACT_EMAIL`. Paywall não é baixado. Se não houver PDF aberto, baixe no site da revista e envie na seção 1.
-
-## Latência esperada
-
-Com 6 GB VRAM + 8 GB RAM, o 9B força offload. ~2 tokens/s é esperado; uma resposta curta pode levar 1–2 minutos. A UI usa `st.status` para deixar isso explícito.
-
-Se ficar insuportável, no `.env`:
-
-```bash
-OLLAMA_MODEL=qwen3.5:4b
-```
-
-Depois: `ollama pull qwen3.5:4b`
-
-## Troubleshooting
+## Problemas comuns
 
 | Problema | Solução |
 | --- | --- |
-| Erro pedindo OpenAI / GPT-4o | Confirme `llm`, `summary_llm`, `agent_llm` e `enrichment_llm` + `*_config` apontando para Ollama (já no `app.py`) |
+| Erro pedindo OpenAI / GPT-4o | Rode `python -m pytest tests/test_llm_settings.py`; não defina `OPENAI_API_KEY` |
 | `Connection refused :11434` | Inicie o Ollama e teste `ollama list` |
-| Modelo não encontrado | `ollama pull qwen3.5:9b` (ou o nome no `.env`) |
-| Python antigo | Use 3.11+ |
-| Embedding lento no 1º run | Download do modelo HuggingFace na 1ª indexação |
-| Timeout do agente | O app usa 1800s; se ainda estourar, baixe para `qwen3.5:4b` |
+| Modelo não encontrado | `ollama pull <modelo do .env>` |
+| Resposta em inglês | Ajuste `ANSWER_LANGUAGE` no `.env`; modelos pequenos às vezes ignoram |
+| Embedding lento na 1ª vez | Download do modelo HuggingFace na primeira indexação |
+| Índice ilegível após atualizar | "Apagar índice" e reindexar |
 
-## Arquitetura
+## Licença e créditos
 
-- **LLM / summary / agent / enrichment:** Ollama (`ollama/<modelo>` via LiteLLM)
-- **Embeddings:** `st-multi-qa-MiniLM-L6-cos-v1` (local)
-- **UI:** Streamlit com `st.status` para latência alta
-- **Índice:** `agent.index.paper_directory` e `index_directory` (não `Settings.paper_directory`, que o Pydantic ignora)
+Interface e código do `ipeia_academico/`: [edidiodantas](https://github.com/edidiodantas). Este repositório ainda não tem arquivo de licença. PaperQA2: FutureHouse, licença Apache 2.0.

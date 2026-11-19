@@ -7,3 +7,7 @@ showSidebarNavigation = false
 
 [server]
 headless = true
+# Uso individual: só aceita conexões desta máquina (o Docker sobrescreve).
+address = "127.0.0.1"
+# Em MB. Igual a MAX_FILE_BYTES em ipeia_academico/library.py (livros grandes).
+maxUploadSize = 200
