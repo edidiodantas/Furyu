@@ -9,7 +9,19 @@
 
 Cada achado diz **o que foi conferido** (arquivo e linha do commit `0c51ac1`), o **impacto**, a **correção** e o **status**. Os itens marcados como *suposição* não foram comprovados por execução e estão sinalizados.
 
-Ambiente de verificação: Python 3.13, `paper-qa 2026.8.12`, `streamlit 1.67.0`, `httpx 0.28.1`, num container Linux **sem Ollama e sem GPU**. Por isso a indexação e as respostas com um LLM real **não foram testadas de ponta a ponta**. A tela foi carregada com o `streamlit.testing.AppTest` e não lançou exceções.
+Ambientes de verificação:
+
+1. **Container Linux, sem Ollama:** Python 3.13, `paper-qa 2026.8.12`, `streamlit 1.67.0`, `httpx 0.28.1`. Rodei os testes unitários, o lint e a tela via `streamlit.testing.AppTest`.
+2. **PC do usuário (2026-11-19):** Linux, Python 3.12.15, Ollama 0.40.2, GTX 750 com 4 GB, modelo `llama3.2:3b`. O teste ponta a ponta passou:
+   - um texto de teste foi indexado em 83,5 s, tempo que inclui o download do modelo de embedding;
+   - duas perguntas foram respondidas corretamente, em português e com citação, em 49,6 s e 29,1 s;
+   - depois de recriar o serviço a partir do disco, o acervo continuou lá, sem reindexar;
+   - a tela subiu e o `/_stcore/health` respondeu `ok`;
+   - o `ollama ps` mostrou 84% do modelo na GPU.
+
+   Duas limitações apareceram:
+   - Em arquivos `.txt`, o PaperQA2 não consegue extrair título, DOI e autores, então a referência sai com campos genéricos (`[Title of Container]`).
+   - O modelo de 3B às vezes acrescenta uma frase contraditória à resposta.
 
 ## Resumo
 
@@ -134,7 +146,7 @@ Ambiente de verificação: Python 3.13, `paper-qa 2026.8.12`, `streamlit 1.67.0`
 ## Pendências (não corrigidas)
 
 1. **Versões fixas:** o `requirements.txt` não fixa versões (`paper-qa[local,pymupdf]>=5`). Uma versão nova do PaperQA2 pode mudar a API de `Settings` ou o formato do `docs.pkl`. Recomendo, depois de validar no seu PC com o Ollama, gerar um `requirements.lock` com `pip freeze`.
-2. **Teste ponta a ponta com Ollama:** não foi possível aqui. Roteiro sugerido: indexar 1 PDF pequeno, perguntar, fechar o app, reabrir e perguntar de novo sem reindexar.
+2. **Metadados de arquivos sem cabeçalho bibliográfico:** em TXT/MD e em livros, a citação inferida pode sair genérica. Falta permitir que o usuário informe título, autores e ano no envio (o `Docs.aadd` aceita `citation`, `title`, `doi` e `authors`).
 3. **Referências em ABNT/BibTeX:** o PaperQA2 gera citações em formato livre. Para escrever artigos, falta uma exportação ABNT (RF-12 do documento de requisitos).
 4. **EPUB:** não é suportado pelo PaperQA2 nesta versão. Hoje, converta antes com o Calibre (`ebook-convert livro.epub livro.txt`).
 5. **Remover um documento do acervo:** o `Docs` tem `delete`, mas não implementei na tela. Hoje só dá para apagar o índice inteiro.
