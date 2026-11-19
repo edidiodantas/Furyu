@@ -51,12 +51,12 @@ Na pasta `C:\paperqa-gui-local`:
 install-windows.bat
 ```
 
-Isso cria o `.venv`, instala as libs (incluindo `httpx` da busca) e gera um `.env` Windows com `OLLAMA_MODEL=qwen3.5:4b`.
+Isso cria o `.venv`, instala as libs (incluindo `httpx` da busca) e gera um `.env` Windows com `LLM_PROVIDER=ollama` e `LLM_MODEL=qwen3.5:4b`.
 
 Edite o `.env` e coloque um **e-mail real da escola**:
 
 ```
-OLLAMA_MODEL=qwen3.5:4b
+LLM_MODEL=qwen3.5:4b
 CONTACT_EMAIL=seu.email@escola.edu.br
 ```
 

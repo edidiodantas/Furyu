@@ -135,7 +135,7 @@ Ambientes de verificação:
 ### 14. Teste que não testava (média)
 
 - **Conferido:** `test_keys.py` redefine `make_key` com a mesma expressão do `app.py` e testa essa cópia. Uma mudança no app não quebraria o teste.
-- **Correção:** a função foi extraída (`ui_helpers.hit_button_key`) e passou a ser testada diretamente. Agora são 99 testes `pytest`, sem rede.
+- **Correção:** a função foi extraída (`ui_helpers.hit_button_key`) e passou a ser testada diretamente. Agora são 126 testes `pytest`, sem rede.
 
 ### 15 a 17. Itens menores
 
@@ -156,6 +156,6 @@ Ambientes de verificação:
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest        # 99 testes
+python -m pytest        # 126 testes
 ruff check .            # lint
 ```

@@ -28,7 +28,7 @@ bash "$SCRIPT_DIR/montar-linux-env.sh"
 export OLLAMA_MODELS="$MNT/ollama-models"
 mkdir -p "$OLLAMA_MODELS"
 
-MODEL="${1:-$(grep -E '^OLLAMA_MODEL=' "$PROJECT_ROOT/.env" | cut -d= -f2- || true)}"
+MODEL="${1:-$(grep -E '^(LLM_MODEL|OLLAMA_MODEL)=' "$PROJECT_ROOT/.env" | head -1 | cut -d= -f2- || true)}"
 MODEL="${MODEL:-qwen3.5:2b}"
 
 echo "== Ollama Deepin =="

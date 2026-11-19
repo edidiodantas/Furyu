@@ -23,7 +23,7 @@ Construído sobre o [PaperQA2](https://github.com/Future-House/paper-qa) (Apache
 ## Início rápido (Linux / macOS)
 
 ```bash
-# 1. Ollama: https://ollama.com/download
+# 1. Ollama (ou configure outro motor de IA no .env, veja "Trocar o motor de IA")
 ollama pull qwen3.5:4b
 
 # 2. App
@@ -46,7 +46,9 @@ No Windows, use `install-windows.bat` e `rodar-windows.bat` ([guia](INSTALAR-WIN
 app.py                      Interface Streamlit (só tela)
 ipeia_academico/
   config.py                 Lê e valida o .env
-  llm_settings.py           Settings do PaperQA2 com os 4 papéis de LLM no Ollama
+  providers.py              Catálogo de provedores de IA (Ollama, OpenAI, Anthropic...)
+  llm_settings.py           Settings do PaperQA2 para o provedor escolhido
+  llm_health.py             Diz se a IA configurada está pronta
   ollama_health.py          Checa se o Ollama e o modelo estão disponíveis
   library.py                Acervo persistente: arquivos, índice (docs.pkl) e manifesto
   research_service.py       Regra de negócio: indexar e perguntar
@@ -73,18 +75,28 @@ python -m pytest
 
 Os testes usam dublês (sem rede, sem Ollama). O teste de `llm_settings` é pulado se o `paper-qa` não estiver instalado.
 
-## Por que configurar os quatro papéis de LLM
+## Trocar o motor de IA
 
-O PaperQA2 usa quatro papéis de LLM, e o padrão de todos é um modelo da OpenAI:
+O motor de IA é trocável **só pelo `.env`**, sem mexer no código (regra obrigatória dos projetos IPeia). A ligação com os provedores é feita pelo LiteLLM, que o PaperQA2 já usa.
 
-| Papel | Setting | Uso |
-| --- | --- | --- |
-| Resposta + metadados | `llm` + `llm_config` | Indexar e responder |
-| Resumos de evidência | `summary_llm` + `summary_llm_config` | Resumir trechos |
-| Agente | `agent.agent_llm` + `agent_llm_config` | Modo agente |
-| Enriquecimento | `parsing.enrichment_llm` + `enrichment_llm_config` | Figuras/tabelas |
+| `LLM_PROVIDER` | Onde roda | Chave (variável de ambiente) | Exemplo de `LLM_MODEL` |
+| --- | --- | --- | --- |
+| `ollama` (padrão) | Seu PC | nenhuma | `qwen3.5:4b`, `llama3.2:3b` |
+| `openai_compatible` | Seu PC ou servidor (LM Studio, vLLM, llama.cpp) | opcional | nome do modelo carregado; exige `LLM_API_BASE` |
+| `anthropic` | Nuvem | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, `claude-sonnet-5-5` |
+| `openai` | Nuvem | `OPENAI_API_KEY` | modelo da sua conta |
+| `gemini` | Nuvem | `GEMINI_API_KEY` | modelo da sua conta |
+| `openrouter` | Nuvem | `OPENROUTER_API_KEY` | `fornecedor/modelo` |
 
-`ipeia_academico/llm_settings.py` aponta os quatro para o Ollama, e `tests/test_llm_settings.py` garante isso. **Não defina `OPENAI_API_KEY`.**
+Outras opções no `.env`:
+
+- `SUMMARY_LLM_MODEL`: um modelo mais barato só para resumir os trechos.
+- `EMBEDDING_MODEL`: o padrão é `st-*`, local. `ollama/bge-m3` também roda local e é multilíngue, bom para português. Se trocar o embedding, o app pede para reindexar.
+- `ANSWER_LENGTH`, `EVIDENCE_K` e `ANSWER_MAX_SOURCES`: com modelos maiores, aumente-os para respostas mais longas e com mais fontes.
+
+**Privacidade:** com um provedor na nuvem, trechos dos documentos e as perguntas são enviados a ele. A tela mostra um aviso quando isso acontece.
+
+Os quatro papéis de LLM do PaperQA2 (resposta, resumo, agente e enriquecimento) são configurados juntos em `ipeia_academico/llm_settings.py`. Se algum ficasse sem configuração, o PaperQA2 usaria a OpenAI por padrão. `tests/test_llm_settings.py` garante que isso não acontece.
 
 ## Onde ficam os dados
 
@@ -107,7 +119,8 @@ As portas ficam presas a `127.0.0.1`. Docker não deixa o LLM mais rápido.
 
 | Problema | Solução |
 | --- | --- |
-| Erro pedindo OpenAI / GPT-4o | Rode `python -m pytest tests/test_llm_settings.py`; não defina `OPENAI_API_KEY` |
+| Erro pedindo OpenAI / GPT-4o | Rode `python -m pytest tests/test_llm_settings.py` e confira `LLM_PROVIDER` |
+| "Falta a chave ..." | Preencha a chave do provedor escolhido no `.env` |
 | `Connection refused :11434` | Inicie o Ollama e teste `ollama list` |
 | Modelo não encontrado | `ollama pull <modelo do .env>` |
 | Resposta em inglês | Ajuste `ANSWER_LANGUAGE` no `.env`; modelos pequenos às vezes ignoram |

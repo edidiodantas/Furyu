@@ -25,8 +25,9 @@ from ipeia_academico.library import (
     LibraryRepository,
     sha256_bytes,
 )
+from ipeia_academico.llm_health import check_llm
 from ipeia_academico.llm_settings import build_settings
-from ipeia_academico.ollama_health import OllamaHealth, check_ollama
+from ipeia_academico.ollama_health import OllamaHealth
 from ipeia_academico.research_service import IndexOutcome, QuestionError, ResearchService
 from ipeia_academico.search import (
     SearchError,
@@ -49,9 +50,12 @@ FAVICON_PATH = ROOT / "assets" / "favicon-ipeia.png"
 # ---------------------------------------------------------------------------
 def _bootstrap_config() -> AppConfig:
     load_dotenv(ROOT / ".env")
-    # Evita fallback acidental para a API paga se a chave existir no shell.
-    os.environ.pop("OPENAI_API_KEY", None)
     config = load_config(os.environ, ROOT)
+    # Evita uso acidental da OpenAI quando outro provedor foi escolhido.
+    if config.provider.api_key_env != "OPENAI_API_KEY" and not config.embedding_model.startswith(
+        ("text-embedding", "openai/")
+    ):
+        os.environ.pop("OPENAI_API_KEY", None)
     config.pdf_dir.mkdir(parents=True, exist_ok=True)
     config.pqa_home.mkdir(parents=True, exist_ok=True)
     os.environ["PQA_HOME"] = str(config.pqa_home.resolve())
@@ -73,10 +77,10 @@ def get_service(_config: AppConfig) -> ResearchService:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def get_ollama_health(base_url: str, model: str) -> OllamaHealth:
+def get_llm_health(_config: AppConfig) -> OllamaHealth:
     # Cache de 30 s: antes a checagem rodava a cada clique e travava até 3 s
     # quando o Ollama estava desligado.
-    return check_ollama(base_url, model)
+    return check_llm(_config, os.environ)
 
 
 def init_session_state() -> None:
@@ -111,9 +115,14 @@ def render_header(config: AppConfig, health: OllamaHealth) -> None:
         st.markdown(f'<div class="app-title">{APP_NAME}</div>', unsafe_allow_html=True)
     st.caption("Pesquisa, leitura e escrita acadêmica com IA local, a partir do seu acervo.")
     st.caption(
-        f"Modelo: `{config.ollama_model}` · Embeddings: `{config.embedding_model}` · "
-        f"Ollama: `{config.ollama_base_url}`"
+        f"IA: `{config.llm_name}` · Embeddings: `{config.embedding_model}`"
+        + (f" · Servidor: `{config.llm_api_base}`" if config.llm_api_base else "")
     )
+    if not config.is_local:
+        st.warning(
+            "Privacidade: com IA ou embedding na nuvem, trechos dos seus documentos e as "
+            "perguntas são enviados ao provedor configurado no .env."
+        )
     (st.success if health.ok else st.error)(health.message)
 
 
@@ -156,7 +165,7 @@ def _index_file(service: ResearchService, path: Path, digest: str, source: str) 
         st.success(f"Indexado: {result.docname or result.filename}")
 
 
-def render_upload(service: ResearchService, ollama_ok: bool) -> None:
+def render_upload(service: ResearchService, llm_ok: bool) -> None:
     st.subheader("1. Enviar documentos (artigos e livros)")
     exts = [e.lstrip(".") for e in ALLOWED_EXTENSIONS]
     uploaded = st.file_uploader(
@@ -164,7 +173,7 @@ def render_upload(service: ResearchService, ollama_ok: bool) -> None:
         type=exts,
         accept_multiple_files=True,
         help="Os arquivos ficam no seu computador e o índice é salvo em disco.",
-        disabled=not ollama_ok,
+        disabled=not llm_ok,
     )
     for f in uploaded or []:
         data = f.getvalue()
@@ -187,7 +196,7 @@ def render_upload(service: ResearchService, ollama_ok: bool) -> None:
                 st.error(f"Falha: {exc}")
 
 
-def render_search(config: AppConfig, service: ResearchService, ollama_ok: bool) -> None:
+def render_search(config: AppConfig, service: ResearchService, llm_ok: bool) -> None:
     st.subheader("2. Buscar artigos (acesso aberto)")
     st.caption(
         "Sem login. Começa no **Oasisbr (IBICT)**; se não houver resultado, usa "
@@ -236,7 +245,7 @@ def render_search(config: AppConfig, service: ResearchService, ollama_ok: bool) 
             if st.button(
                 "Baixar PDF aberto e indexar",
                 key=hit_button_key(i, hit),
-                disabled=not (ollama_ok and hit.has_open_pdf),
+                disabled=not (llm_ok and hit.has_open_pdf),
             ):
                 _download_and_index(config, service, hit)
 
@@ -253,7 +262,7 @@ def _download_and_index(config: AppConfig, service: ResearchService, hit) -> Non
                 path.unlink(missing_ok=True)  # mesmo conteúdo já está no acervo
                 status.update(label="Este PDF já está no acervo", state="complete")
                 return
-            st.write("Indexando com o Ollama (pode demorar)…")
+            st.write("Indexando (pode demorar)…")
             _index_file(service, path, digest, source=f"download:{url}")
             status.update(label=f"Indexado: {path.name}", state="complete")
         except Exception as exc:  # noqa: BLE001
@@ -261,7 +270,7 @@ def _download_and_index(config: AppConfig, service: ResearchService, hit) -> Non
             st.error(str(exc))
 
 
-def render_question(config: AppConfig, service: ResearchService, ollama_ok: bool) -> None:
+def render_question(config: AppConfig, service: ResearchService, llm_ok: bool) -> None:
     st.subheader("3. Pergunta")
     question = st.text_input(
         "Pergunte sobre o seu acervo",
@@ -270,9 +279,9 @@ def render_question(config: AppConfig, service: ResearchService, ollama_ok: bool
     has_docs = service.has_documents()
     if not has_docs:
         st.info("O acervo está vazio. Envie ou baixe documentos acima.")
-    if not st.button("Perguntar", type="primary", disabled=not (has_docs and question.strip() and ollama_ok)):
+    if not st.button("Perguntar", type="primary", disabled=not (has_docs and question.strip() and llm_ok)):
         return
-    with st.status(f"Processando com `{config.ollama_model}`… (1 a 3 minutos)", expanded=True) as status:
+    with st.status(f"Processando com `{config.llm_model}`…", expanded=True) as status:
         try:
             st.session_state.last_answer = get_loop().run(service.ask(question, config.answer_language))
             st.session_state.last_question = question.strip()
@@ -300,7 +309,7 @@ def render_answer(config: AppConfig) -> None:
             st.session_state.last_question,
             answer,
             references,
-            model=config.ollama_model,
+            model=config.llm_name,
             generated_at=datetime.now(),
         ),
         file_name="resposta-ipeia-academico.md",
@@ -356,7 +365,7 @@ def main() -> None:
         st.stop()
 
     init_session_state()
-    health = get_ollama_health(config.ollama_base_url, config.ollama_model)
+    health = get_llm_health(config)
     render_header(config, health)
 
     try:

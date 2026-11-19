@@ -1,8 +1,8 @@
-"""Monta o `Settings` do PaperQA2 apontando todos os papéis de LLM para o Ollama.
+"""Monta o `Settings` do PaperQA2 a partir da configuração (qualquer provedor).
 
-Por que os quatro papéis: o padrão do PaperQA2 para llm, summary_llm,
-agent_llm e enrichment_llm é um modelo da OpenAI. Se qualquer um ficar sem
-configuração, o PaperQA2 tenta a API paga (e falha sem chave).
+Por que configurar os quatro papéis: o padrão do PaperQA2 para llm,
+summary_llm, agent_llm e enrichment_llm é um modelo da OpenAI. Se qualquer um
+ficar sem configuração, o PaperQA2 tenta essa API mesmo com outro provedor.
 """
 
 from __future__ import annotations
@@ -18,42 +18,60 @@ LLM_TIMEOUT_SECONDS = 600
 AGENT_TIMEOUT_SECONDS = 1800.0
 
 
-def build_ollama_llm_config(llm_name: str, base_url: str) -> dict[str, Any]:
-    """Config do LiteLLM Router para o Ollama local."""
-    return {
-        "model_list": [
-            {
-                "model_name": llm_name,
-                "litellm_params": {
-                    "model": llm_name,
-                    "api_base": base_url,
-                    "api_type": "ollama",
-                    "timeout": LLM_TIMEOUT_SECONDS,
-                    "temperature": 0.0,
-                },
-            }
-        ]
-    }
+def build_llm_config(
+    llm_name: str,
+    *,
+    api_base: str = "",
+    temperature: float | None = None,
+    provider: str = "",
+) -> dict[str, Any]:
+    """Config do LiteLLM Router para um modelo.
+
+    A chave de API não entra aqui: o LiteLLM lê a variável padrão do
+    provedor (ANTHROPIC_API_KEY, OPENAI_API_KEY...) do ambiente.
+    """
+    params: dict[str, Any] = {"model": llm_name, "timeout": LLM_TIMEOUT_SECONDS}
+    if api_base:
+        params["api_base"] = api_base
+    if temperature is not None:
+        params["temperature"] = temperature
+    if provider == "ollama":
+        params["api_type"] = "ollama"
+    return {"model_list": [{"model_name": llm_name, "litellm_params": params}]}
+
+
+def build_embedding_config(config: AppConfig) -> dict[str, Any] | None:
+    """kwargs repassados ao litellm.aembedding (ex.: api_base do Ollama)."""
+    api_base = config.embedding_api_base
+    if not api_base and config.embedding_model.startswith("ollama/"):
+        api_base = config.llm_api_base if config.provider.name == "ollama" else "http://localhost:11434"
+    return {"kwargs": {"api_base": api_base}} if api_base else None
 
 
 def build_settings(config: AppConfig) -> Settings:
-    """Settings 100% locais: Ollama (LLM) + sentence-transformers (embeddings).
+    """Settings do PaperQA2 para o modo manual (Docs.aadd / Docs.aquery).
 
-    Observação: o app usa `Docs.aadd`/`Docs.aquery` (modo manual, sem agente).
     `agent.index` só é usado se alguém rodar o modo agente (`pqa ask`) com
     estas mesmas Settings; o acervo do app é persistido por `library.py`.
     """
-    llm_name = config.llm_name
-    llm_config = build_ollama_llm_config(llm_name, config.ollama_base_url)
+    common = {
+        "api_base": config.llm_api_base,
+        "temperature": config.llm_temperature,
+        "provider": config.provider.name,
+    }
+    llm_config = build_llm_config(config.llm_name, **common)
+    summary_config = build_llm_config(config.summary_llm_name, **common)
 
     return Settings(
-        llm=llm_name,
+        llm=config.llm_name,
         llm_config=llm_config,
-        summary_llm=llm_name,
-        summary_llm_config=llm_config,
+        summary_llm=config.summary_llm_name,
+        summary_llm_config=summary_config,
         embedding=config.embedding_model,
+        embedding_config=build_embedding_config(config),
+        temperature=config.llm_temperature if config.llm_temperature is not None else 0.0,
         agent=AgentSettings(
-            agent_llm=llm_name,
+            agent_llm=config.llm_name,
             agent_llm_config=llm_config,
             timeout=AGENT_TIMEOUT_SECONDS,
             index=IndexSettings(
@@ -63,10 +81,15 @@ def build_settings(config: AppConfig) -> Settings:
             ),
         ),
         parsing=ParsingSettings(
-            # Sem isto, figuras/tabelas seriam descritas por um modelo da OpenAI.
-            enrichment_llm=llm_name,
+            enrichment_llm=config.llm_name,
             enrichment_llm_config=llm_config,
             multimodal=False,
         ),
-        answer=AnswerSettings(max_concurrent_requests=1),
+        answer=AnswerSettings(
+            # Local: 1 requisição por vez (GPU pequena). Remoto: paralelo acelera.
+            max_concurrent_requests=1 if config.provider.is_local else 4,
+            evidence_k=config.evidence_k,
+            answer_max_sources=config.answer_max_sources,
+            answer_length=config.answer_length,
+        ),
     )

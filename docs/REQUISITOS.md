@@ -93,13 +93,19 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
 | RF-27 | Desabilitar indexação e perguntas quando o Ollama não estiver pronto | Alta | Implementado |
 | RF-28 | Detectar troca de `EMBEDDING_MODEL` e oferecer reindexar | Alta | Implementado |
 | RF-29 | Oferecer "Apagar índice e recomeçar" quando o índice estiver ilegível | Média | Implementado |
+| RF-30 | **Trocar o motor de IA só pelo `.env`** (`LLM_PROVIDER` + `LLM_MODEL`): Ollama, servidor compatível com OpenAI, OpenAI, Anthropic, Gemini e OpenRouter | **Obrigatória** | Implementado (testado com Ollama; provedores na nuvem só por testes de configuração) |
+| RF-31 | Modelo de resumo separado (`SUMMARY_LLM_MODEL`) e embedding configurável, incluindo `ollama/...` | Média | Implementado |
+| RF-32 | Ajustar o tamanho da resposta e a quantidade de trechos e fontes (`ANSWER_LENGTH`, `EVIDENCE_K`, `ANSWER_MAX_SOURCES`) | Média | Implementado |
+| RF-33 | Mostrar se a IA configurada está pronta: Ollama consultado; na nuvem, conferência da chave sem gerar custo | Alta | Implementado |
 
 ## 3. Requisitos não funcionais
 
 | ID | Categoria | Requisito | Status |
 | --- | --- | --- | --- |
-| RNF-01 | Privacidade | Documentos, embeddings e LLM ficam na máquina do usuário. Só a busca de artigos acessa a internet | Implementado |
-| RNF-02 | Custo | Nenhuma API paga. Os quatro papéis de LLM do PaperQA2 apontam para o Ollama, e um teste garante isso | Implementado |
+| RNF-01 | Privacidade | No modo local (padrão), documentos, embeddings e LLM ficam na máquina. Com um provedor na nuvem, a tela avisa que trechos e perguntas são enviados a ele | Implementado |
+| RNF-02 | Custo e portabilidade | Os quatro papéis de LLM do PaperQA2 seguem o provedor escolhido, e nenhum cai na OpenAI por omissão (garantido por teste). Custo zero no modo local | Implementado |
+| RNF-17 | Arquitetura | Motor de IA desacoplado (adaptador por provedor, em `providers.py`). Obrigatório em todos os projetos IPeia (arquitetura híbrida RAG/CAG) | Implementado |
+| RNF-18 | Identidade visual | Logo oficial IPeia no cabeçalho, no favicon e no README (obrigatória em todos os projetos) | Implementado |
 | RNF-03 | Segurança | Nenhum segredo no código: configuração só por `.env`, que está no `.gitignore` | Implementado |
 | RNF-04 | Segurança | Interface e Ollama acessíveis apenas em `127.0.0.1` | Implementado |
 | RNF-05 | Segurança | Nomes de arquivo sanitizados (sem `../`), downloads limitados a `http`/`https` e texto externo escapado na tela | Implementado |
@@ -110,7 +116,7 @@ Ajudar uma pessoa pesquisadora a **pesquisar, ler e escrever textos acadêmicos*
 | RNF-10 | Desempenho | A checagem do Ollama não bloqueia a interface por mais de 3 s e fica em cache por 30 s | Implementado |
 | RNF-11 | Portabilidade | Mesmo código no Windows 11 e no Linux (Deepin/Ubuntu), com Python 3.11+. Docker opcional | Implementado |
 | RNF-12 | Manutenibilidade | Código modular em camadas, sem dependências circulares, com módulos de até cerca de 300 linhas (exceto a UI) | Implementado |
-| RNF-13 | Testabilidade | Testes unitários sem rede e sem Ollama (dependências injetadas), rodando com `python -m pytest` | Implementado (99 testes) |
+| RNF-13 | Testabilidade | Testes unitários sem rede e sem Ollama (dependências injetadas), rodando com `python -m pytest` | Implementado (126 testes) |
 | RNF-14 | Reprodutibilidade | Versões de dependências fixadas (lock) | Proposto |
 | RNF-15 | Usabilidade | Interface em português, com mensagens que dizem o que fazer em caso de erro | Implementado |
 | RNF-16 | Integridade acadêmica | Lembrar o usuário de conferir as citações no original | Implementado (aviso no README e no .md exportado) |
@@ -205,7 +211,7 @@ As dependências seguem num só sentido (UI → serviço → dados/integrações
 | Componente | Papel | Observação |
 | --- | --- | --- |
 | PaperQA2 (`paper-qa`) | Parsing, chunking, embeddings, recuperação e resposta com citações | Modo manual (`Docs.aadd` / `Docs.aquery`), sem agente |
-| Ollama | LLM local para os quatro papéis | Padrão `qwen3.5:4b` (nome mantido do projeto original, não verificado no registro do Ollama) |
+| Motor de IA (LiteLLM) | LLM para os quatro papéis | Ollama por padrão; troca por `.env` (RF-30) |
 | sentence-transformers | Embeddings locais (`st-multi-qa-MiniLM-L6-cos-v1`) | Via extra `paper-qa[local]` |
 | Streamlit | Interface web local | Só em `127.0.0.1` |
 | Oasisbr, Semantic Scholar, Crossref, Unpaywall, SciELO | Descoberta de artigos e de PDFs abertos | APIs públicas. O Semantic Scholar tem limite de taxa sem chave |
@@ -223,8 +229,14 @@ As dependências seguem num só sentido (UI → serviço → dados/integrações
 
 | Variável | Padrão | Uso |
 | --- | --- | --- |
-| `OLLAMA_MODEL` | `qwen3.5:4b` | Modelo do LLM |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Servidor Ollama |
+| `LLM_PROVIDER` | `ollama` | Provedor do motor de IA |
+| `LLM_MODEL` | `qwen3.5:4b` | Modelo (aceita `OLLAMA_MODEL` por compatibilidade) |
+| `LLM_API_BASE` | `http://localhost:11434` no Ollama | Servidor (aceita `OLLAMA_BASE_URL`) |
+| `SUMMARY_LLM_MODEL` | igual ao `LLM_MODEL` | Modelo para resumir trechos |
+| `LLM_TEMPERATURE` | 0 no Ollama; não enviado nos demais | Temperatura |
+| `*_API_KEY` | vazio | Chave do provedor na nuvem |
+| `EMBEDDING_API_BASE` | vazio | Servidor do embedding |
+| `ANSWER_LENGTH`, `EVIDENCE_K`, `ANSWER_MAX_SOURCES` | `cerca de 300 palavras`, 10, 5 | Tamanho e abrangência da resposta |
 | `EMBEDDING_MODEL` | `st-multi-qa-MiniLM-L6-cos-v1` | Embeddings locais |
 | `PDF_DIR` | `./documentos` | Arquivos |
 | `PQA_HOME` | `./.pqa` | Índice e cache |
@@ -261,5 +273,6 @@ As dependências seguem num só sentido (UI → serviço → dados/integrações
 | RF-22 | `export.answer_to_markdown` | `tests/test_export_and_ui.py` |
 | RF-26 | `ollama_health.check_ollama` | `tests/test_ollama_health.py` |
 | RF-28 | `library._check_embedding_model` | `tests/test_library.py` |
-| RNF-02 | `llm_settings.build_settings` | `tests/test_llm_settings.py` |
+| RNF-02, RF-30 | `providers.py`, `config.load_config`, `llm_settings.build_settings` | `tests/test_providers.py`, `tests/test_config.py`, `tests/test_llm_settings.py` |
+| RF-33 | `llm_health.check_llm` | `tests/test_llm_health.py` |
 | RNF-08 | `research_service.add_document` | `tests/test_research_service.py` |

@@ -1,7 +1,13 @@
 #!/bin/sh
 set -eu
-OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://ollama:11434}"
-OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:4b}"
+LLM_PROVIDER="${LLM_PROVIDER:-ollama}"
+OLLAMA_BASE_URL="${LLM_API_BASE:-${OLLAMA_BASE_URL:-http://ollama:11434}}"
+OLLAMA_MODEL="${LLM_MODEL:-${OLLAMA_MODEL:-qwen3.5:4b}}"
+
+if [ "$LLM_PROVIDER" != "ollama" ]; then
+  # Motor de IA na nuvem ou em outro servidor: não espera nem baixa nada do Ollama.
+  exec streamlit run /app/app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+fi
 
 echo "Aguardando Ollama em ${OLLAMA_BASE_URL} …"
 i=0
