@@ -1,9 +1,9 @@
-# Instalar o AcervoQA no Windows 11 (i7 + SSD) a partir do pendrive
+# Instalar o IPeia Acadêmico no Windows 11 (i7 + SSD) a partir do pendrive
 
 Este é o caminho certo para o PC da apresentação: **Python + Ollama nativos no SSD**.  
 Não rode o projeto de dentro do pendrive (ele está em exFAT; o `.venv` quebra).
 
-O **AcervoQA** é o **mesmo** programa do Linux: `app.py` + `academic_search.py` (Oasisbr, SciELO, Unpaywall). Só muda a instalação. Na tela o título é **AcervoQA**.
+O **IPeia Acadêmico** é o **mesmo** programa do Linux: `app.py` + a pasta `ipeia_academico/` (Oasisbr, SciELO, Unpaywall). Só muda a instalação. Na tela o título é **IPeia Acadêmico**.
 
 ## 0. Copiar para o SSD
 
@@ -11,7 +11,7 @@ No Explorer: copie a pasta **inteira** `paperqa-gui-local` do pendrive para, por
 
 `C:\paperqa-gui-local`
 
-Não clone um GitHub antigo: a busca Oasisbr está nesta pasta (`academic_search.py`).  
+Não clone um GitHub antigo: o código do app está na pasta `ipeia_academico/`.  
 Não reutilize o `.env` do Deepin (ele aponta para `/media/.../pqa-linux`). O instalador gera um `.env` do Windows.
 
 Abra o **PowerShell** ou **CMD** nessa pasta.
@@ -51,12 +51,12 @@ Na pasta `C:\paperqa-gui-local`:
 install-windows.bat
 ```
 
-Isso cria o `.venv`, instala as libs (incluindo `httpx` da busca) e gera um `.env` Windows com `OLLAMA_MODEL=qwen3.5:4b`.
+Isso cria o `.venv`, instala as libs (incluindo `httpx` da busca) e gera um `.env` Windows com `LLM_PROVIDER=ollama` e `LLM_MODEL=qwen3.5:4b`.
 
 Edite o `.env` e coloque um **e-mail real da escola**:
 
 ```
-OLLAMA_MODEL=qwen3.5:4b
+LLM_MODEL=qwen3.5:4b
 CONTACT_EMAIL=seu.email@escola.edu.br
 ```
 
@@ -106,7 +106,7 @@ Textos da tela: [FUNCOES.txt](FUNCOES.txt).
 
 **Não** desinstale Python nem Ollama. O que costuma quebrar é misturar pasta velha com pasta nova.
 
-1. Feche o CMD do AcervoQA (janela preta) e o navegador nessa aba.
+1. Feche o CMD do IPeia Acadêmico (janela preta) e o navegador nessa aba.
 2. Renomeie a pasta antiga, por exemplo:
    - `Desktop\paperqa-gui-local` → `Desktop\paperqa-gui-local-OLD`
 3. Copie do pendrive a pasta **inteira** `paperqa-gui-local` para o mesmo lugar (Área de trabalho ou `C:\`).
@@ -114,6 +114,6 @@ Textos da tela: [FUNCOES.txt](FUNCOES.txt).
 5. Abra o `.env` novo e cole o `CONTACT_EMAIL` que já estava no `.env` da pasta `-OLD`.
 6. Ollama aberto → `rodar-windows.bat`.
 7. Recrie o atalho apontando para o **novo** `rodar-windows.bat`.
-8. Quando a tela **AcervoQA** abrir, apague a pasta `-OLD`.
+8. Quando a tela **IPeia Acadêmico** abrir, apague a pasta `-OLD`.
 
 Não copie a pasta do pendrive **para dentro** da pasta antiga (fica `paperqa-gui-local\paperqa-gui-local`). Apague ou renomeie a antiga primeiro.

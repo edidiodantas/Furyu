@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/config.sh"
 cd "$PROJECT_ROOT"
 
-echo "== AcervoQA · setup Deepin =="
+echo "== IPeia Acadêmico · setup Deepin =="
 echo "Projeto: $PROJECT_ROOT"
 echo "Volume Linux: $IMG  (${IMG_SIZE_GB}G, ext4, no pendrive)"
 echo
@@ -101,7 +101,7 @@ else
   echo "Ollama já instalado: $(command -v ollama)"
 fi
 
-MODEL="$(grep -E '^OLLAMA_MODEL=' "$PROJECT_ROOT/.env" | cut -d= -f2- || true)"
+MODEL="$(grep -E '^(LLM_MODEL|OLLAMA_MODEL)=' "$PROJECT_ROOT/.env" | head -1 | cut -d= -f2- || true)"
 MODEL="${MODEL:-qwen3.5:4b}"
 echo
 echo "Quando for baixar o modelo (vai para o pendrive, não para ~/.ollama):"

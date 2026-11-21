@@ -1,140 +1,158 @@
-# AcervoQA
+<p align="center"><img src="assets/logo-ipeia.png" alt="Logo IPeia" width="180"></p>
 
-Pesquisa e leitura de artigos científicos no seu computador.
+# IPeia Acadêmico
 
-Interface gráfica para [PaperQA2](https://github.com/Future-House/paper-qa) usando **somente IA local via Ollama** — custo zero, sem OpenAI.
+Pesquisa, leitura e escrita acadêmica no seu computador, com IA **100% local** (Ollama), sem custo de API e sem enviar seus arquivos para a nuvem.
 
-O **mesmo** `app.py` roda no Windows 11 e no Deepin. Só o jeito de instalar muda.
+Você monta um **acervo** com artigos e livros (PDF, TXT, MD, HTML), busca artigos em acesso aberto (Oasisbr/IBICT, Semantic Scholar, Crossref, Unpaywall) e faz perguntas. As respostas trazem citações dos seus documentos e podem ser baixadas em Markdown para usar na escrita.
 
-## Levar no pendrive → PC Windows 11 (i7 + SSD)
+Construído sobre o [PaperQA2](https://github.com/Future-House/paper-qa) (Apache 2.0), com interface em Streamlit.
 
-Para a viagem: **Python + Ollama no SSD do Windows**. Instalar os dois não é problema e é mais simples que Docker nesse cenário.
+> **Atenção acadêmica:** a IA pode errar ou atribuir uma ideia ao documento errado. Confira cada citação no texto original antes de usá-la em um trabalho.
 
-Guia passo a passo: **[INSTALAR-WINDOWS.md](INSTALAR-WINDOWS.md)**  
-Funções da tela (TXT): **[FUNCOES.txt](FUNCOES.txt)**
+## Documentação
 
-Resumo: copie `paperqa-gui-local` para `C:\paperqa-gui-local` (não rode no pendrive) → Python 3.12 → Ollama → `install-windows.bat` → `ollama pull qwen3.5:4b` → `rodar-windows.bat`. A tela é a mesma (enviar PDF, buscar Oasisbr, perguntar).
+| Documento | Conteúdo |
+| --- | --- |
+| [docs/REQUISITOS.md](docs/REQUISITOS.md) | Especificação de requisitos (RF/RNF, casos de uso, arquitetura) |
+| [docs/ANALISE-TECNICA.md](docs/ANALISE-TECNICA.md) | Revisão do código: falhas encontradas, correções e pendências |
+| [INSTALAR-WINDOWS.md](INSTALAR-WINDOWS.md) | Instalação no Windows 11 |
+| [INSTALAR-DEEPIN.md](INSTALAR-DEEPIN.md) | Instalação no Deepin/Linux com pendrive |
+| [FUNCOES.txt](FUNCOES.txt) | O que cada parte da tela faz |
 
-## MVP opcional: Windows + Docker
-
-Docker **não deixa o LLM mais rápido**. Nesta viagem (pendrive → i7 Windows), **pule**. Só use depois se quiser um `docker compose up` como “produto”. Detalhes antigos: `docker compose up --build` e http://localhost:8501.
-
-## Hardware alvo
-
-- **Windows 11:** i7, 8 GB RAM, RTX ~6 GB VRAM → `qwen3.5:9b` (ou 4b se lento)
-- **Deepin 23.1 (este PC):** Ryzen 5 4500, 16 GB RAM, GTX 750 4 GB → use `qwen3.5:4b` (GPU antiga, tende a CPU)
-- Alternativa ainda mais leve: `qwen3.5:2b` no `.env`
-
-## Instalar no Deepin 23 (pendrive, sem SSD)
-
-Não instale venv/modelos no SSD nem no exFAT nativo. Guia completo: **[INSTALAR-DEEPIN.md](INSTALAR-DEEPIN.md)**.
-
-Quando for a hora:
+## Início rápido (Linux / macOS)
 
 ```bash
-cd /media/Edidio/8662-B449/paperqa-gui-local
-bash scripts/setup-deepin.sh
-bash scripts/rodar-deepin.sh
-```
+# 1. Ollama (ou configure outro motor de IA no .env, veja "Trocar o motor de IA")
+ollama pull qwen3.5:4b
 
-## Por que `llm="ollama/..."` sozinho não basta
-
-O PaperQA2 usa **quatro** papéis de LLM. O padrão de todos é OpenAI GPT-4o:
-
-| Papel | Setting | Uso |
-| --- | --- | --- |
-| Resposta + metadados | `llm` + `llm_config` | Indexar e responder |
-| Resumos de evidência | `summary_llm` + `summary_llm_config` | `gather_evidence` |
-| Agente (ferramentas) | `agent.agent_llm` + `agent_llm_config` | Escolher ferramentas |
-| Enrichment multimodal | `parsing.enrichment_llm` + `enrichment_llm_config` | Figuras/tabelas |
-
-O README oficial do PaperQA mostra só `llm` e `summary_llm` no exemplo Ollama. Sem `agent_llm`, ele cai no GPT-4o ([#731](https://github.com/Future-House/paper-qa/discussions/731), [#1321](https://github.com/Future-House/paper-qa/issues/1321)). Versões recentes também usam `enrichment_llm` (padrão GPT-4o) se o multimodal estiver ligado.
-
-Este app configura os quatro + `api_base` do Ollama. Embeddings usam `st-*` (sentence-transformers), sem API paga.
-
-**Não defina `OPENAI_API_KEY`.**
-
-## 1. Instalar Ollama
-
-1. Instale: https://ollama.com/download
-2. Baixe o modelo:
-
-```bash
-ollama pull qwen3.5:9b
-```
-
-Teste:
-
-```bash
-ollama run qwen3.5:9b "Olá"
-```
-
-Deixe o Ollama rodando (`http://localhost:11434`).
-
-No **Deepin / pendrive** pule as seções 2–3 abaixo e use [INSTALAR-DEEPIN.md](INSTALAR-DEEPIN.md).
-
-## 2. Ambiente Python 3.11+ (Windows / disco NTFS ou ext4)
-
-Não crie `.venv` em pendrive **exFAT**. No Windows, clone para o HD/SSD NTFS.
-
-```bash
-git clone https://github.com/edidiodantas/paperqa-gui-local.git
-cd paperqa-gui-local
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
+# 2. App
+git clone https://github.com/edidiodantas/Furyu.git ipeia-academico
+cd ipeia-academico
+python3 -m venv .venv && source .venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
-copy .env.example .env      # Linux: cp .env.example .env
+cp .env.example .env        # edite CONTACT_EMAIL se quiser usar o Unpaywall
+
+# 3. Rodar
+streamlit run app.py        # abre em http://localhost:8501
 ```
 
-`paper-qa[local,pymupdf]` instala sentence-transformers (embeddings locais) e o parser PDF.
+No Windows, use `install-windows.bat` e `rodar-windows.bat` ([guia](INSTALAR-WINDOWS.md)).
 
-Edite `.env` se quiser trocar o modelo (ex.: `OLLAMA_MODEL=qwen3.5:4b`).
+## Estrutura
 
-## 3. Rodar a interface
+```
+app.py                      Interface Streamlit (só tela)
+ipeia_academico/
+  config.py                 Lê e valida o .env
+  providers.py              Catálogo de provedores de IA (Ollama, OpenAI, Anthropic...)
+  llm_settings.py           Settings do PaperQA2 para o provedor escolhido
+  llm_health.py             Diz se a IA configurada está pronta
+  ollama_health.py          Checa se o Ollama e o modelo estão disponíveis
+  library.py                Acervo persistente: arquivos, índice (docs.pkl) e manifesto
+  research_service.py       Regra de negócio: indexar, perguntar e guardar referências
+  writing_service.py        Modos de escrita: resumo de documento e texto por seções
+  academic_prompts.py       Instruções em português acadêmico e parâmetros de cada modo
+  abnt.py                   Referências e citações ABNT (funções puras)
+  citations.py              Troca as chaves do PaperQA2 por (Sobrenome, ano, p. X)
+  ui/                       Telas: modos de escrita e formulário da referência
+  async_runner.py           Event loop único para chamar o PaperQA2 a partir do Streamlit
+  search/                   Busca em catálogos abertos e download de PDF
+    catalogs.py             Oasisbr, Semantic Scholar, Crossref
+    unpaywall.py            PDF aberto pelo DOI
+    download.py             Download com limite de tamanho e checagem %PDF
+    parsing.py              Extração de metadados (funções puras)
+    service.py              Cascata de catálogos + deduplicação
+  export.py                 Exporta o resultado para Markdown
+  ui_helpers.py             Funções puras da interface
+tests/                      Testes unitários (pytest), sem rede e sem Ollama
+docs/                       Requisitos e análise técnica
+scripts/, *.bat, docker/    Instalação e execução
+```
+
+## Testes
 
 ```bash
-streamlit run app.py
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
-Abra o URL local (geralmente http://localhost:8501).
+Os testes usam dublês (sem rede, sem Ollama). O teste de `llm_settings` é pulado se o `paper-qa` não estiver instalado.
 
-## Uso
+## Modos de escrita e ABNT
 
-1. Faça upload de PDFs **ou** busque um artigo aberto (seção 2 da tela).
-2. Aguarde a indexação (status na tela — será lento no 9B).
-3. Digite a pergunta e clique em **Perguntar**.
-4. Veja a resposta com citações e abra **Mostrar Fontes**.
-5. Use **Limpar Sessão** na barra lateral para recomeçar.
+Na seção 3 da tela há três modos:
 
-A busca acadêmica **não pede login**. Começa no **Oasisbr (IBICT)** — API pública e grátis, com SciELO e repositórios brasileiros. Se o Oasisbr falhar, usa Semantic Scholar/Crossref. O Unpaywall só entra para PDF em acesso aberto. No `.env`: `CONTACT_EMAIL`. Paywall não é baixado. Se não houver PDF aberto, baixe no site da revista e envie na seção 1.
+| Modo | O que faz | Como busca no acervo |
+| --- | --- | --- |
+| **Pergunta** | Resposta curta (padrão de cerca de 300 palavras) | Os trechos mais parecidos com a pergunta, de todo o acervo |
+| **Resumo de documento** | Resumo acadêmico de um documento: objetivo, método, resultados e conclusões | Só trechos do documento escolhido (15 trechos) |
+| **Texto acadêmico** | Texto com as seções que você escolher (padrão: Introdução, Desenvolvimento, Considerações finais) | Uma busca própria para cada seção |
 
-## Latência esperada
+As instruções da IA pedem português do Brasil, norma culta e linguagem impessoal, sem inventar dados.
 
-Com 6 GB VRAM + 8 GB RAM, o 9B força offload. ~2 tokens/s é esperado; uma resposta curta pode levar 1–2 minutos. A UI usa `st.status` para deixar isso explícito.
+**Citações e referências.** Em *Dados da referência (ABNT)* (seção 1) você informa autor, título, ano, editora ou periódico de cada documento. Com isso, o app troca as marcas de citação da IA por **(Silva, 2020, p. 15)** e monta a lista de **REFERÊNCIAS** em ordem alfabética. Quem formata é o código, não a IA, então o formato sai certo mesmo com modelo pequeno. PDFs baixados pela busca já vêm com os dados do catálogo, para você conferir.
 
-Se ficar insuportável, no `.env`:
+- A citação segue a NBR 10520:2023, que usa o sobrenome em maiúsculas e minúsculas. Se a sua instituição ainda pede (SILVA, 2020), use `CITATION_UPPERCASE=true` no `.env`.
+- Documento sem dados preenchidos aparece com o nome interno e com o aviso "[dados ABNT não preenchidos]".
+- Arquivos `.txt`, `.md` e `.html` não têm página, então a citação sai sem "p.".
+- **Revise sempre.** O formato das referências segue a NBR 6023:2018 nos casos mais comuns (livro, artigo e documento on-line). A IA pode citar o trecho errado, então confira as páginas no original.
+
+Não é preciso anexar as normas da ABNT ao acervo: tudo o que está no acervo vira fonte de citação.
+
+## Trocar o motor de IA
+
+O motor de IA é trocável **só pelo `.env`**, sem mexer no código (regra obrigatória dos projetos IPeia). A ligação com os provedores é feita pelo LiteLLM, que o PaperQA2 já usa.
+
+| `LLM_PROVIDER` | Onde roda | Chave (variável de ambiente) | Exemplo de `LLM_MODEL` |
+| --- | --- | --- | --- |
+| `ollama` (padrão) | Seu PC | nenhuma | `qwen3.5:4b`, `llama3.2:3b` |
+| `openai_compatible` | Seu PC ou servidor (LM Studio, vLLM, llama.cpp) | opcional | nome do modelo carregado; exige `LLM_API_BASE` |
+| `anthropic` | Nuvem | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, `claude-sonnet-5-5` |
+| `openai` | Nuvem | `OPENAI_API_KEY` | modelo da sua conta |
+| `gemini` | Nuvem | `GEMINI_API_KEY` | modelo da sua conta |
+| `openrouter` | Nuvem | `OPENROUTER_API_KEY` | `fornecedor/modelo` |
+
+Outras opções no `.env`:
+
+- `SUMMARY_LLM_MODEL`: um modelo mais barato só para resumir os trechos.
+- `EMBEDDING_MODEL`: o padrão é `st-*`, local. `ollama/bge-m3` também roda local e é multilíngue, bom para português. Se trocar o embedding, o app pede para reindexar.
+- `ANSWER_LENGTH`, `EVIDENCE_K` e `ANSWER_MAX_SOURCES`: com modelos maiores, aumente-os para respostas mais longas e com mais fontes.
+
+**Privacidade:** com um provedor na nuvem, trechos dos documentos e as perguntas são enviados a ele. A tela mostra um aviso quando isso acontece.
+
+Os quatro papéis de LLM do PaperQA2 (resposta, resumo, agente e enriquecimento) são configurados juntos em `ipeia_academico/llm_settings.py`. Se algum ficasse sem configuração, o PaperQA2 usaria a OpenAI por padrão. `tests/test_llm_settings.py` garante que isso não acontece.
+
+## Onde ficam os dados
+
+| O quê | Onde (padrão) |
+| --- | --- |
+| Arquivos enviados/baixados | `documentos/` (`PDF_DIR`) |
+| Índice do acervo | `.pqa/acervo/docs.pkl` e `.pqa/acervo/manifest.json` (`PQA_HOME`) |
+
+O índice usa `pickle` (forma de salvar documentada pelo PaperQA2). **Nunca carregue um `docs.pkl` recebido de outra pessoa**, porque pickle pode executar código. Se atualizar o `paper-qa` e o índice deixar de abrir, use "Apagar índice" na barra lateral e reindexe.
+
+## Docker (opcional)
 
 ```bash
-OLLAMA_MODEL=qwen3.5:4b
+docker compose up --build    # http://localhost:8501
 ```
 
-Depois: `ollama pull qwen3.5:4b`
+As portas ficam presas a `127.0.0.1`. Docker não deixa o LLM mais rápido.
 
-## Troubleshooting
+## Problemas comuns
 
 | Problema | Solução |
 | --- | --- |
-| Erro pedindo OpenAI / GPT-4o | Confirme `llm`, `summary_llm`, `agent_llm` e `enrichment_llm` + `*_config` apontando para Ollama (já no `app.py`) |
+| Erro pedindo OpenAI / GPT-4o | Rode `python -m pytest tests/test_llm_settings.py` e confira `LLM_PROVIDER` |
+| "Falta a chave ..." | Preencha a chave do provedor escolhido no `.env` |
 | `Connection refused :11434` | Inicie o Ollama e teste `ollama list` |
-| Modelo não encontrado | `ollama pull qwen3.5:9b` (ou o nome no `.env`) |
-| Python antigo | Use 3.11+ |
-| Embedding lento no 1º run | Download do modelo HuggingFace na 1ª indexação |
-| Timeout do agente | O app usa 1800s; se ainda estourar, baixe para `qwen3.5:4b` |
+| Modelo não encontrado | `ollama pull <modelo do .env>` |
+| Resposta em inglês | Ajuste `ANSWER_LANGUAGE` no `.env`; modelos pequenos às vezes ignoram |
+| Embedding lento na 1ª vez | Download do modelo HuggingFace na primeira indexação |
+| Índice ilegível após atualizar | "Apagar índice" e reindexar |
 
-## Arquitetura
+## Licença e créditos
 
-- **LLM / summary / agent / enrichment:** Ollama (`ollama/<modelo>` via LiteLLM)
-- **Embeddings:** `st-multi-qa-MiniLM-L6-cos-v1` (local)
-- **UI:** Streamlit com `st.status` para latência alta
-- **Índice:** `agent.index.paper_directory` e `index_directory` (não `Settings.paper_directory`, que o Pydantic ignora)
+Interface e código do `ipeia_academico/`: [edidiodantas](https://github.com/edidiodantas). Este repositório ainda não tem arquivo de licença. PaperQA2: FutureHouse, licença Apache 2.0.

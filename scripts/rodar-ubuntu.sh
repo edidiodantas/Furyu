@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Roda o AcervoQA no Ubuntu
+# Roda o IPeia Acadêmico no Ubuntu
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,6 +14,6 @@ fi
 
 source .venv/bin/activate
 
-echo "AcervoQA — Ollama precisa estar rodando (localhost:11434)."
+echo "IPeia Acadêmico — Ollama precisa estar rodando (localhost:11434)."
 echo "Abrindo http://localhost:8501 ..."
 streamlit run app.py

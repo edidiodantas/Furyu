@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo.
-echo === AcervoQA · instalacao Windows ===
+echo === IPeia Academico - instalacao Windows ===
 echo Pasta: %CD%
 echo.
 
@@ -19,8 +19,8 @@ if not exist "app.py" (
   echo ERRO: app.py nao encontrado. Copie a pasta inteira do pendrive.
   exit /b 1
 )
-if not exist "academic_search.py" (
-  echo ERRO: falta academic_search.py ^(busca Oasisbr^).
+if not exist "ipeia_academico\__init__.py" (
+  echo ERRO: falta a pasta ipeia_academico ^(codigo do app^).
   echo Copie a pasta ATUAL do pendrive, nao um clone antigo do GitHub.
   exit /b 1
 )
@@ -66,8 +66,8 @@ if "%NEED_ENV%"=="1" (
 echo.
 echo Pronto. Agora:
 echo   1. Instale o Ollama e rode:  ollama pull qwen3.5:4b
-echo   2. Edite o .env: CONTACT_EMAIL=seu.email@escola.edu.br
-echo      ^(e-mail real; nao e login de usuario^)
+echo   2. Edite o .env: CONTACT_EMAIL=seu e-mail real
+echo      ^(usado so pelo Unpaywall; nao e login^)
 echo   3. Rode:  rodar-windows.bat
 echo      ou:    .venv\Scripts\activate
 echo             streamlit run app.py
